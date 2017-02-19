@@ -1,0 +1,339 @@
+#!/bin/bash
+
+#set -x
+
+# color defs
+# Reset
+Color_Off='\033[0m'       # Text Reset
+
+# Regular Colors
+Black='\033[0;30m'        # Black
+Red='\033[0;31m'          # Red
+Green='\033[0;32m'        # Green
+Yellow='\033[0;33m'       # Yellow
+Blue='\033[0;34m'         # Blue
+Purple='\033[0;35m'       # Purple
+Cyan='\033[0;36m'         # Cyan
+White='\033[0;37m'        # White
+
+# Bold
+BBlack='\033[1;30m'       # Black
+BRed='\033[1;31m'         # Red
+BGreen='\033[1;32m'       # Green
+BYellow='\033[1;33m'      # Yellow
+BBlue='\033[1;34m'        # Blue
+BPurple='\033[1;35m'      # Purple
+BCyan='\033[1;36m'        # Cyan
+BWhite='\033[1;37m'       # White
+
+# Underline
+UBlack='\033[4;30m'       # Black
+URed='\033[4;31m'         # Red
+UGreen='\033[4;32m'       # Green
+UYellow='\033[4;33m'      # Yellow
+UBlue='\033[4;34m'        # Blue
+UPurple='\033[4;35m'      # Purple
+UCyan='\033[4;36m'        # Cyan
+UWhite='\033[4;37m'       # White
+
+# Background
+On_Black='\033[40m'       # Black
+On_Red='\033[41m'         # Red
+On_Green='\033[42m'       # Green
+On_Yellow='\033[43m'      # Yellow
+On_Blue='\033[44m'        # Blue
+On_Purple='\033[45m'      # Purple
+On_Cyan='\033[46m'        # Cyan
+On_White='\033[47m'       # White
+
+# High Intensity
+IBlack='\033[0;90m'       # Black
+IRed='\033[0;91m'         # Red
+IGreen='\033[0;92m'       # Green
+IYellow='\033[0;93m'      # Yellow
+IBlue='\033[0;94m'        # Blue
+IPurple='\033[0;95m'      # Purple
+ICyan='\033[0;96m'        # Cyan
+IWhite='\033[0;97m'       # White
+
+# Bold High Intensity
+BIBlack='\033[1;90m'      # Black
+BIRed='\033[1;91m'        # Red
+BIGreen='\033[1;92m'      # Green
+BIYellow='\033[1;93m'     # Yellow
+BIBlue='\033[1;94m'       # Blue
+BIPurple='\033[1;95m'     # Purple
+BICyan='\033[1;96m'       # Cyan
+BIWhite='\033[1;97m'      # White
+
+# High Intensity backgrounds
+On_IBlack='\033[0;100m'   # Black
+On_IRed='\033[0;101m'     # Red
+On_IGreen='\033[0;102m'   # Green
+On_IYellow='\033[0;103m'  # Yellow
+On_IBlue='\033[0;104m'    # Blue
+On_IPurple='\033[0;105m'  # Purple
+On_ICyan='\033[0;106m'    # Cyan
+On_IWhite='\033[0;107m'   # White
+
+
+#reset sudo cache timer if set previously
+sudo -k
+is_sudo=0
+SUDOPWD=
+
+login_name=$(logname)
+im_root=0
+
+CRYPTPWD=
+
+# Define the dialog exit status codes
+: ${DIALOG_OK=0}
+: ${DIALOG_CANCEL=1}
+
+# FUNCTIONS ==================================================================
+
+exists()
+{
+  command -v "$1" >/dev/null 2>&1
+}
+
+validate_sudopwd()
+{
+  if [ "$is_sudo" = "1" ] ; then
+    clear
+    break
+  else
+    dialog --title "ERROR" --msgbox '\nINCORRECT SUDO PASSWORD!\n\nPlease try again!' 9 30
+  fi
+}
+
+get_sudo_pwd()
+{
+  # get password
+  while true; do
+    SUDOPWD=$(dialog --title "Enter sudo password" --insecure --passwordbox "\nThis script requires sudo access. Please enter your sudo password (your login password) to be used for the elevated script operations. The password will be cached internally by this script.\n\n" 14 50  2>&1 > /dev/tty)
+    ret=$?
+
+    sudo -k
+    echo ${SUDOPWD} | sudo -S -v &> /dev/null
+
+    # evaluate sudo password test
+    if [ $? -ne 0 ]; then 
+      is_sudo=0;
+    else
+      is_sudo=1;
+    fi    
+
+    # ok (proceed) / cancel
+    case $ret in
+      0)
+        validate_sudopwd;;
+      1)
+        exit 1;;
+    esac
+  done
+}
+
+# use the locally cached sudo password if sudo doesn't cache the password by policy (or if it has expired)
+sudoit()
+{
+  
+  if [ "$im_root" -eq 0 ] ; then
+    if sudo -n true 2>/dev/null; then 
+      sudo $*
+    else
+      echo ${SUDOPWD} | sudo -S $*  &> /dev/null
+    fi
+  else
+    # running as root, no sudo needed
+    $*
+  fi
+}
+
+
+# INITIAL CHECKS =============================================================
+
+if ! exists dialog ; then
+  printf "\n*************************************************************************************************\n\
+This script requires dialog. Install it first with 'sudo apt-get install dialog', then try again!\n\
+*************************************************************************************************\n\n"
+  exit 1
+fi
+
+if [ "$EUID" -ne 0 ] ; then
+  if [ $is_sudo -eq 0 ] ; then
+    get_sudo_pwd
+  fi
+else
+  im_root=1  
+fi
+
+CRYPTSETUP=`sudo which cryptsetup`
+if [ $? -ne 0 ] ; then
+  printf "\n*********************************************************************************************************\n\
+This script requires cryptsetup. Install it first with 'sudo apt-get install cryptsetup', then try again!\n\
+*********************************************************************************************************\n\n"
+  exit 1
+fi
+
+
+# QUERY DISK DETAILS
+
+# file system ext4 / zfs
+#  -> check that zfsutils-linux is installed if zfs is selected
+# cryptdisk file location
+#  -> check write permissions user/sudo
+# http://stackoverflow.com/questions/14103806/bash-test-if-a-directory-is-writable-by-a-given-uid
+# disk file size
+#  -> check min filesize of 128MB
+#  -> check available disk space for the requested disk size
+# cryptdisk label (suggest same as filename), but check /dev/mapper for active name conflicts
+# disk password (2x)
+
+
+# MAIN LOGIC: QUERY VAULT PARAMETERS
+
+# FILE SYSTEM SELECTION
+CRYPTFSSEL=$(dialog --title "Select crypto vault file system" --radiolist "\nSelect the file system for the encrypted vault.\nZFS is recommended for multiple reasons.\n\n" 12 55 2 \
+            1 zfs on \
+            2 ext4 off \
+          2>&1 > /dev/tty)
+ret=$?
+
+# ok (proceed) / cancel
+case $ret in
+  0)
+    ;;
+  1)
+    exit 1;;
+esac
+
+if [ "$CRYPTFSSEL" = "1" ] ; then
+  CRYPTFS=zfs
+
+  ZFS=`sudo which zfs`
+  if [ $? -ne 0 ] ; then
+    printf "\n\n******************************************************************************************************************************\n\
+To use ZFS filesystem zfsutils-linux is required. Install it first with 'sudo apt-get install zfsutils-linux', then try again!\
+\n******************************************************************************************************************************\n\n\n"
+    exit 1
+  fi
+
+else
+  CRYPTFS=ext4
+fi
+
+
+# ENCRYPTION PASSWORD SELECTION
+while true; do
+  CRYPTPWD1=$(dialog --title "Enter encryption password" --insecure --passwordbox "\nEnter the passphrase you want the vault to be encrypted with.\n\n" 12 50  2>&1 > /dev/tty)
+  ret=$?
+
+  # ok (proceed) / cancel
+  case $ret in
+    0)
+      ;;
+    1)
+      exit 1;;
+  esac
+
+  CRYPTPWD2=$(dialog --title "Repeat encryption password" --insecure --passwordbox "\nEnter again the passphrase you want the vault to be encrypted with.\n\n" 12 50 2>&1 > /dev/tty)
+  ret=$?
+
+  # ok (proceed) / cancel
+  case $ret in
+    0)
+      ;;
+    1)
+      exit 1;;
+  esac
+
+  if [ "$CRYPTPWD1" = "$CRYPTPWD2" ] ; then
+
+    if [ "$CRYPTPWD1" = "" ] ; then
+      dialog --title "ERROR" --msgbox '\nAn empty passphrase is not allowed!\n\nPlease try again!' 9 30
+    else 
+      CRYPTPWD=$CRYPTPWD1
+      break
+    fi
+  else
+    dialog --title "ERROR" --msgbox '\nPASSPHRASES DO NOT MATCH!!\n\nPlease try again!' 9 30
+  fi
+done
+
+# VAULT SIZE SELECTION
+while true; do
+  CRYPTOVAULTSIZEINPUT=$(dialog --title "Enter desired crypto vault size" --inputbox "\nEnter the desired vault size in\nmegabytes (MB) or gigabytes (GB).\n\nPlease be mindful of the available drive space.\n\n" 14 55 512MB 2>&1 > /dev/tty)
+  ret=$?
+
+  # ok (proceed) / cancel
+  case $ret in
+    0)
+      ;;
+    1)
+      exit 1;;
+  esac
+  
+  if [[ $CRYPTOVAULTSIZEINPUT =~ ^([0-9]+)[[:space:]]*(MB|Mb|mb|GB|Gb|gb)$ ]] ; then
+  
+    #TODO: MIN 128MB CHECK WHEN ZFS IS IN EFFECT
+  
+    VAULTSIZEVAL=${BASH_REMATCH[1]}
+    VAULTSIZEUNIT=$(echo "${BASH_REMATCH[2]}" | awk '{print toupper($0)}')
+    break
+  else
+    dialog --title "ERROR" --msgbox '\nUnacceptable vault size!\n\nPlease enter numeric size followed by "MB" or "GB"!' 11 30
+  fi
+  
+done
+
+# VAULT FILE DIR
+
+
+# VAULT MOUNTPOINT (dir must exist)
+while true; do
+  dialog --title "Mountpoint selection" --msgbox '\nIn the next screen select the location where you want the vault to be mounted when opened. If this is a system-wide vault, use a path under /mnt/. For a personal vault, select a mountpoint under the home directory.\n\nNOTE: If non-existent path is entered, the directory will be created. If an existing but non-empty directory is entered, you will be asked to purge its contents.\n\nNOTE: Use Up/Dn [arrow] to move to move the selector, SPACE to copy selected directory to the edit line, and ENTER to accept the current path in the edit box. To move to subdir/parent, add/remove "/" after the directory name on the edit line.' 22 70
+
+  MOUNTPATH=$(dialog --title "Mount point selection" --dselect ${HOME}/ 16 60 2>&1 > /dev/tty)
+  ret=$?
+  
+  case $ret in
+    0)
+      ;;
+    1)
+      exit 1;;
+  esac
+
+  dialog --title "Confirm selected mountpoint" --yesno "\nYou selected mount path:\n\n${MOUNTPATH}\n\nIs this what you want?" 15 70
+  ret=$?
+  
+  case $ret in
+    0)
+      break;;
+    1)
+      ;;
+  esac
+  
+done
+
+
+# check for dir exist -> create if not exist
+# check for dir contents -> ask to clear if not empty
+# if path is is other user's home other than the current user, ask to create for that user
+#  then just.. 'sudo -u ville mkdir /home/ville/newdir' and stuff
+#  get location ownership with: ls -ld /home/ville | awk '{print $3}'
+# add confirmation of the selected path (because it's too easy to hit ENTER...)
+# vault file and the mountpoint location should probably be owned by the same user...
+
+# review..
+echo "Crypto FS: $CRYPTFS"
+echo "Crypto PWD: $CRYPTPWD"
+echo "Crypto vault size: $VAULTSIZEVAL"
+echo "Crypto vault size unit: $VAULTSIZEUNIT"
+echo "Crypto vault mountpath: $MOUNTPATH"
+
+# create mount/umount scripts
+
+echo -e "\e${BWhite}\e${On_Red} ELEVATED: \e${Color_Off} touch /root/testfile25"
+sudoit touch /root/testfile25
