@@ -82,7 +82,8 @@ sudo -k
 is_sudo=0
 SUDOPWD=
 
-login_name=$(logname)
+login_user=$(logname)
+current_user=`whoami`
 im_root=0
 
 CRYPTPWD=
@@ -138,19 +139,53 @@ get_sudo_pwd()
 # use the locally cached sudo password if sudo doesn't cache the password by policy (or if it has expired)
 sudoit()
 {
-  
   if [ "$im_root" -eq 0 ] ; then
     if sudo -n true 2>/dev/null; then 
-      sudo $*
+      sudo "$@"
     else
-      echo ${SUDOPWD} | sudo -S $*  &> /dev/null
+      echo ${SUDOPWD} | sudo -S "$@"  &> /dev/null
     fi
   else
     # running as root, no sudo needed
-    $*
+    "$@"
   fi
 }
 
+sudoitas()
+{
+  sudo_user=$1
+  shift
+  if sudo -n true 2>/dev/null; then 
+    sudo -u $sudo_user "$@"
+  else
+    echo ${SUDOPWD} | sudo -S -u $sudo_user "$@"  &> /dev/null
+  fi
+}
+
+find_existing_parent()
+{
+  pathname="$2"
+
+  IFS='/' read -r -a p <<<"${pathname#/}"
+
+  pa=""
+  max="${#p[@]}"
+  i=0
+  while (( i<"$max" )); do
+    paprev=$pa
+    pa="$pa/${p[i++]}"
+    if [[ ! -e $pa ]]; then
+      eval "$1=$paprev"
+      break
+    fi
+  done
+}
+
+find_dir_owner()
+{
+  dirowner=$(ls -ld $2 | awk '{print $3}')
+  eval "$1=$dirowner"
+}
 
 # INITIAL CHECKS =============================================================
 
@@ -283,17 +318,30 @@ while true; do
     VAULTSIZEUNIT=$(echo "${BASH_REMATCH[2]}" | awk '{print toupper($0)}')
     break
   else
-    dialog --title "ERROR" --msgbox '\nUnacceptable vault size!\n\nPlease enter numeric size followed by "MB" or "GB"!' 11 30
+    dialog --title "ERROR" --msgbox '\nUnacceptable vault size!\n\nPlease enter the numeric size (integers only), followed by "MB" or "GB"!' 14 50
   fi
   
 done
 
-# VAULT FILE DIR
+# VAULT LABEL
+
+#TODO: Check for conflicts in /dev/mapper
 
 
-# VAULT MOUNTPOINT (dir must exist)
+# VAULT FILE (LOCATION + FILENAME)
+
+# vault file and the mountpoint location should probably be owned by the same user...
+
+
+# VAULT MOUNTPOINT
+
 while true; do
-  dialog --title "Mountpoint selection" --msgbox '\nIn the next screen select the location where you want the vault to be mounted when opened. If this is a system-wide vault, use a path under /mnt/. For a personal vault, select a mountpoint under the home directory.\n\nNOTE: If non-existent path is entered, the directory will be created. If an existing but non-empty directory is entered, you will be asked to purge its contents.\n\nNOTE: Use Up/Dn [arrow] to move to move the selector, SPACE to copy selected directory to the edit line, and ENTER to accept the current path in the edit box. To move to subdir/parent, add/remove "/" after the directory name on the edit line.' 22 70
+  dialog --title "Mountpoint selection" --msgbox '\nOn the next screen select the location where you want the vault to be mounted when opened. 
+If this is a system-wide vault, use a path under /mnt/. For a personal vault, select a mountpoint under a home directory.\n\n
+NOTE: Use Up/Dn [arrow] to move to move the selector, SPACE to copy selected directory to the edit line, and ENTER to accept the current path in the edit box. 
+To move to subdir/parent, add/remove "/" after the directory name on the edit line.\n\n
+NOTE: If a non-existent path is entered, the directory/directories will be created. Existing but non-empty directories are not accepted.\n\n
+NOTE: Global locations (e.g. /mnt/mountdir) are set up for root access, while user-owned locations (e.g. /home/alice/mountdir) are set up for the owner of the parent dir (i.e. "alice" in this example).' 25 70
 
   MOUNTPATH=$(dialog --title "Mount point selection" --dselect ${HOME}/ 16 60 2>&1 > /dev/tty)
   ret=$?
@@ -305,33 +353,66 @@ while true; do
       exit 1;;
   esac
 
-  dialog --title "Confirm selected mountpoint" --yesno "\nYou selected mount path:\n\n${MOUNTPATH}\n\nIs this what you want?" 15 70
-  ret=$?
+  PATHDETAIL=
+  confirm=false
+  mountpoint_exists=true
+  if [ -d "$MOUNTPATH" ]; then
+    if [ "$(ls -A $MOUNTPATH)" ]; then
+      PATHDETAIL="This directory is not empty.\n\nSelect an empty directory, or create new."
+    else
+      PATHDETAIL="This directory exists and it is empty."
+      confirm=true
+    fi
+  else
+    find_existing_parent mountpath_existing_parent $MOUNTPATH
+    find_dir_owner mountpath_parent_owner $mountpath_existing_parent
+    PATHMORE=''
+    if [ "$current_user" != "$mountpath_parent_owner" ]; then
+      PATHMORE="The selected location is owned by user $mountpath_parent_owner, and the mountpoint will be made private to that user.\n\n"
+    fi
+
+    PATHDETAIL="This directory does not exist; it will be created."
+    confirm=true
+    mountpoint_exists=false
+  fi
+
+  if [ "$confirm" = "true" ]; then
+    dialog --title "Confirm selected mountpoint" --yesno "\nYou selected mount path:\n\n${MOUNTPATH}\n\n${PATHDETAIL}\n\n${PATHMORE}Is this what you want?" 16 70
+    ret=$?
   
-  case $ret in
-    0)
-      break;;
-    1)
-      ;;
-  esac
+    case $ret in
+      0)
+        break;;
+      1)
+        ;;
+    esac
+  
+  else
+    dialog --title "ERROR" --msgbox "\n$PATHDETAIL" 14 50
+  fi
   
 done
 
+if [ "$mountpoint_exists" = "false" ]; then
+  if [ "$current_user" = "$mountpath_parent_owner" ]; then
+    mkdir -p $MOUNTPATH
+  else
+    sudoitas $mountpath_parent_owner mkdir -p $MOUNTPATH
+  fi
+fi
 
-# check for dir exist -> create if not exist
-# check for dir contents -> ask to clear if not empty
-# if path is is other user's home other than the current user, ask to create for that user
-#  then just.. 'sudo -u ville mkdir /home/ville/newdir' and stuff
-#  get location ownership with: ls -ld /home/ville | awk '{print $3}'
-# add confirmation of the selected path (because it's too easy to hit ENTER...)
-# vault file and the mountpoint location should probably be owned by the same user...
 
 # review..
 echo "Crypto FS: $CRYPTFS"
 echo "Crypto PWD: $CRYPTPWD"
 echo "Crypto vault size: $VAULTSIZEVAL"
 echo "Crypto vault size unit: $VAULTSIZEUNIT"
+echo "Crypto vault label: "
+echo "Crypto vault filename: "
+echo "Crypto vault file location: "
+echo "Crypto vault file location ownership: "
 echo "Crypto vault mountpath: $MOUNTPATH"
+echo "Crypto vault mountpath ownership: $mountpath_parent_owner"
 
 # create mount/umount scripts
 
