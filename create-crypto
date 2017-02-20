@@ -105,7 +105,7 @@ validate_sudopwd()
     clear
     break
   else
-    dialog --title "ERROR" --msgbox '\nINCORRECT SUDO PASSWORD!\n\nPlease try again!' 9 30
+    dialog --title "ERROR" --msgbox "\nINCORRECT SUDO PASSWORD!\n\nPlease try again!" 9 30
   fi
 }
 
@@ -273,13 +273,13 @@ while true; do
   if [ "$CRYPTPWD1" = "$CRYPTPWD2" ] ; then
 
     if [ "$CRYPTPWD1" = "" ] ; then
-      dialog --title "ERROR" --msgbox '\nAn empty passphrase is not allowed!\n\nPlease try again!' 9 30
+      dialog --title "ERROR" --msgbox "\nAn empty passphrase is not allowed!\n\nPlease try again!" 9 30
     else 
       CRYPTPWD=$CRYPTPWD1
       break
     fi
   else
-    dialog --title "ERROR" --msgbox '\nPASSPHRASES DO NOT MATCH!!\n\nPlease try again!' 9 30
+    dialog --title "ERROR" --msgbox "\nPASSPHRASES DO NOT MATCH!!\n\nPlease try again!" 9 30
   fi
 done
 
@@ -306,7 +306,7 @@ while true; do
       if [ "$VAULTSIZEUNIT" = "MB" ]; then
         if [ $VAULTSIZEVAL -lt 128 ]; then
           zfssizefault=true
-          dialog --title "ERROR" --msgbox '\nZFS filesystem requires minimum vault size of 128MB!' 8 60
+          dialog --title "ERROR" --msgbox "\nZFS filesystem requires minimum vault size of 128MB!" 8 60
         fi
       fi
     fi
@@ -315,20 +315,27 @@ while true; do
       break
     fi
   else
-    dialog --title "ERROR" --msgbox '\nUnacceptable vault size!\n\nPlease enter the numeric size (integers only), followed by "MB" or "GB"!' 14 50
+    dialog --title "ERROR" --msgbox "\nUnacceptable vault size!\n\nPlease enter the numeric size (integers only), followed by \"MB\" or \"GB\"!" 14 50
   fi
   
 done
 
 
 # VAULT FILE LOCATION
+if [ "$current_user" = "root" ]; then
+  SYSTEMEXAMPLE="\nSuggested system-wide vault file location: /var/vaultfiles"
+else
+  SYSTEMEXAMPLE=''
+fi
+
 while true; do
-  dialog --title "Vault file location selection" --msgbox '\nOn the next screen select the location where you want the vault file to be saved. 
-If this is a system-wide vault, use a path, for example, under /var/ (such as /var/vaultfiles/). For a personal vault, select a location under a home directory (e.g. /home/alice/vaultfiles/).\n\n
+  dialog --title "Vault file location selection" --msgbox "\nOn the next screen select the location where you want the vault file to be saved. 
+If this is a system-wide vault, use a path, for example, under /var/ (such as /var/vaultfiles). For a personal vault, select a location under a home directory (e.g. /home/alice/vaultfiles).\n\n
 NOTE: In this step you will select the directory where the vault file is saved. In the next step you will select the vault file name/label.\n\n
 NOTE: Use Up/Dn [arrow] to move to move the selector, SPACE to copy selected directory to the edit line, and ENTER to accept the current path in the edit box. 
-To move to subdir/parent, add/remove "/" after the directory name on the edit line.\n\n
-NOTE: If a non-existent path is entered, the directory/directories will be created.' 25 70
+To move to subdir/parent, add/remove \"/\" after the directory name on the edit line.\n\n
+NOTE: If a non-existent path is entered, the directory/directories will be created.\n\n
+Suggested vault file location: ${HOME}/vaultfiles${SYSTEMEXAMPLE}" 25 75
 
   VAULTPATH=$(dialog --title "Vault file location selection" --dselect ${HOME}/ 16 60 2>&1 > /dev/tty)
   ret=$?
@@ -446,13 +453,20 @@ done
 
 
 # VAULT MOUNTPOINT
+if [ "$current_user" = "root" ]; then
+  SYSTEMEXAMPLE="\nSuggested system-wide mountpoint location: /mnt/cryptodisk"
+else
+  SYSTEMEXAMPLE=''
+fi
+
 while true; do
-  dialog --title "Mountpoint selection" --msgbox '\nOn the next screen select the location where you want the vault to be mounted when opened. 
+  dialog --title "Mountpoint selection" --msgbox "\nOn the next screen select the location where you want the vault to be mounted when opened. 
 If this is a system-wide vault, use a path under /mnt/. For a personal vault, select a mountpoint under a home directory.\n\n
 NOTE: Use Up/Dn [arrow] to move to move the selector, SPACE to copy selected directory to the edit line, and ENTER to accept the current path in the edit box. 
-To move to subdir/parent, add/remove "/" after the directory name on the edit line.\n\n
+To move to subdir/parent, add/remove \"/\" after the directory name on the edit line.\n\n
 NOTE: If a non-existent path is entered, the directory/directories will be created. Existing but non-empty directories are not accepted. This directory can not be used for other purposes.\n\n
-NOTE: Global locations (e.g. /mnt/mountdir) are set up for root access, while user-owned locations (e.g. /home/alice/mountdir) are set up for the owner of the parent dir (i.e. "alice" in this example).' 25 70
+NOTE: Global locations (e.g. /mnt/mountdir) are set up for root access, while user-owned locations (e.g. /home/alice/mountdir) are set up for the owner of the parent dir (i.e. \"alice\" in this example).\n\n
+Suggested mountpoint location: ${HOME}/cryptodisk${SYSTEMEXAMPLE}" 27 75
 
   MOUNTPATH=$(dialog --title "Mountpoint selection" --dselect ${HOME}/ 16 60 2>&1 > /dev/tty)
   ret=$?
