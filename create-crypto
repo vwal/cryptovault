@@ -324,10 +324,57 @@ while true; do
   
 done
 
-# VAULT FILE (LOCATION)
+# VAULT FILE LOCATION
 
 # ask for vault file location first so that existence of a same-named file can be checked for when the label/filename is inquired for
 # vault file and the mountpoint location should probably be owned by the same user (this check will occur with mountpoint)
+
+while true; do
+  dialog --title "Vault file location selection" --msgbox '\nOn the next screen select the location where you want the vault file to be saved. 
+If this is a system-wide vault, use a path, for example, under /var/ (such as /var/vaultfiles/). For a personal vault, select a location under a home directory (e.g. /home/alice/vaultfiles/).\n\n
+NOTE: In this step you will select the directory where the vault file is saved. In the next step you will select the vault file name/label.\n\n
+NOTE: Use Up/Dn [arrow] to move to move the selector, SPACE to copy selected directory to the edit line, and ENTER to accept the current path in the edit box. 
+To move to subdir/parent, add/remove "/" after the directory name on the edit line.\n\n
+NOTE: If a non-existent path is entered, the directory/directories will be created.' 25 70
+
+  VAULTPATH=$(dialog --title "Vault file location selection" --dselect ${HOME}/ 16 60 2>&1 > /dev/tty)
+  ret=$?
+  
+  case $ret in
+    0)
+      ;;
+    1)
+      exit 1;;
+  esac
+
+  find_existing_parent vaultpath_existing_parent $VAULTPATH
+  find_dir_owner vaultpath_parent_owner $vaultpath_existing_parent
+  PATHMORE=''
+  if [ "$current_user" != "$vaultpath_parent_owner" ]; then
+    if [ "$vaultpath_parent_owner" = "root" ]; then
+      PATHMORE="The selected location a system location, and will be owned by the root user.\n\n"
+    else
+      PATHMORE="The selected location is owned by user $vaultpath_parent_owner, and the vault file will be made private to that user.\n\n"
+    fi
+  fi
+
+  PATHDETAIL=''
+  if [ ! -d "$VAULTPATH" ]; then
+    PATHDETAIL="This directory does not exist; it will be created."
+  fi
+
+  dialog --title "Confirm selected vault file location" --yesno "\nYou selected vault file location:\n\n${VAULTPATH}\n\n${PATHDETAIL}\n\n${PATHMORE}Is this what you want?" 16 70
+  ret=$?
+  
+  case $ret in
+    0)
+      break;;
+    1)
+      ;;
+  esac
+  
+done
+
 
 
 # VAULT LABEL/FILE NAME
