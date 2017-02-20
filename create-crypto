@@ -326,8 +326,9 @@ done
 
 # VAULT FILE LOCATION
 
-# ask for vault file location first so that existence of a same-named file can be checked for when the label/filename is inquired for
-# vault file and the mountpoint location should probably be owned by the same user (this check will occur with mountpoint)
+# TODO: Check for existence of file with the same name
+# TODO: normalize slash in the end of VAULT and MOUNT paths
+# TODO: vault file and the mountpoint location should probably be owned by the same user (this check will occur with mountpoint)
 
 while true; do
   dialog --title "Vault file location selection" --msgbox '\nOn the next screen select the location where you want the vault file to be saved. 
@@ -376,7 +377,6 @@ NOTE: If a non-existent path is entered, the directory/directories will be creat
 done
 
 
-
 # VAULT LABEL/FILE NAME
 while true; do
   CRYPTOVAULTLABELINPUT=$(dialog --title "Crypto Vault Label/File Name" --inputbox "\nEnter the desired vault label (no spaces). It will also be used as the vault file name.\n\n
@@ -413,7 +413,8 @@ NOTE: Since vaults are mapped through /dev/mapper system-wide (even when access 
     esac
 
   else
-    dialog --title "Confirm selected label/filename" --yesno "\nYou selected vault label / file name:\n\n${CRYPTOVAULTLABEL}\n\nIs this what you want?" 16 70
+    VAULTFQFN=${VAULTPATH}/${CRYPTOVAULTLABEL}
+    dialog --title "Confirm selected label/filename" --yesno "\nYou selected vault label / file name:\n\n${CRYPTOVAULTLABEL}\n\nThe full vault file path will be:\n\n${VAULTFQFN}\n\nIs this what you want?" 16 70
     ret=$?
   
     case $ret in
@@ -507,7 +508,7 @@ echo "Crypto PWD: $CRYPTPWD"
 echo "Crypto vault size: $VAULTSIZEVAL"
 echo "Crypto vault size unit: $VAULTSIZEUNIT"
 echo "Crypto vault label/filename: $CRYPTOVAULTLABEL"
-echo "Crypto vault file location: "
+echo "Crypto vault file location: $VAULTPATH"
 echo "Crypto vault file location ownership: "
 echo "Crypto vault mountpath: $MOUNTPATH"
 echo "Crypto vault mountpath ownership: $mountpath_parent_owner"
