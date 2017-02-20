@@ -166,19 +166,23 @@ find_existing_parent()
 {
   pathname="$2"
 
-  IFS='/' read -r -a p <<<"${pathname#/}"
+  if [ -d "$pathname" ]; then
+    eval "$1=$2"  
+  else
+    IFS='/' read -r -a p <<<"${pathname#/}"
 
-  pa=""
-  max="${#p[@]}"
-  i=0
-  while (( i<"$max" )); do
-    paprev=$pa
-    pa="$pa/${p[i++]}"
-    if [[ ! -e $pa ]]; then
-      eval "$1=$paprev"
-      break
-    fi
-  done
+    pa=""
+    max="${#p[@]}"
+    i=0
+    while (( i<"$max" )); do
+      paprev=$pa
+      pa="$pa/${p[i++]}"
+      if [[ ! -e $pa ]]; then
+        eval "$1=$paprev"
+        break
+      fi
+    done
+  fi
 }
 
 find_dir_owner()
@@ -350,12 +354,7 @@ Suggested vault file location: ${HOME}/vaultfiles${SYSTEMEXAMPLE}" 25 75
       exit 1;;
   esac
 
-  if [ ! -d "$VAULTPATH" ]; then
-    find_existing_parent vaultpath_existing_parent $VAULTPATH
-  else
-    vaultpath_existing_parent=$VAULTPATH
-  fi
-
+  find_existing_parent vaultpath_existing_parent $VAULTPATH
   find_dir_owner vaultpath_parent_owner $vaultpath_existing_parent
 
   PATHMORE=''
@@ -481,11 +480,7 @@ Suggested mountpoint location: ${HOME}/cryptodisk${SYSTEMEXAMPLE}" 27 75
       exit 1;;
   esac
 
-  if [ ! -d "$MOUNTPATH" ]; then
-    find_existing_parent mountpath_existing_parent $MOUNTPATH
-  else
-    mountpath_existing_parent=$MOUNTPATH
-  fi
+  find_existing_parent mountpath_existing_parent $MOUNTPATH
   find_dir_owner mountpath_parent_owner $mountpath_existing_parent
 
   DIFF_OWNERS=''
