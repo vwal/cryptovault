@@ -220,7 +220,7 @@ fi
 # MAIN LOGIC: QUERY VAULT PARAMETERS =========================================
 
 # FILE SYSTEM SELECTION
-CRYPTFSSEL=$(dialog --title "Select crypto vault file system" --radiolist "\nSelect the file system for the encrypted vault.\nZFS is recommended for multiple reasons.\n\n" 12 55 2 \
+CRYPTOFSSEL=$(dialog --title "Select crypto vault file system" --radiolist "\nSelect the file system for the encrypted vault.\nZFS is recommended for multiple reasons.\n\n" 12 55 2 \
             1 zfs on \
             2 ext4 off \
           2>&1 > /dev/tty)
@@ -234,8 +234,8 @@ case $ret in
     exit 1;;
 esac
 
-if [ "$CRYPTFSSEL" = "1" ] ; then
-  CRYPTFS=zfs
+if [ "$CRYPTOFSSEL" = "1" ] ; then
+  CRYPTOFS=zfs
 
   ZFS=`sudo which zfs`
   if [ $? -ne 0 ] ; then
@@ -246,7 +246,7 @@ To use ZFS filesystem zfsutils-linux is required. Install it first with 'sudo ap
   fi
 
 else
-  CRYPTFS=ext4
+  CRYPTOFS=ext4
 fi
 
 
@@ -306,13 +306,11 @@ while true; do
     VAULTSIZEUNIT=$(echo "${BASH_REMATCH[2]}" | awk '{print toupper($0)}')
 
     zfssizefault=false
-    if [ "$CRYPTFS" = "zfs" ]; then
-      if [ "$VAULTSIZEUNIT" = "MB" ]; then
-        if [ $VAULTSIZEVAL -lt 128 ]; then
+    if [ "$CRYPTOFS" = "zfs" ] &&
+       [ "$VAULTSIZEUNIT" = "MB" ] &&
+       [ $VAULTSIZEVAL -lt 128 ]; then
           zfssizefault=true
           dialog --title "ERROR" --msgbox "\nZFS filesystem requires minimum vault size of 128MB!" 8 60
-        fi
-      fi
     fi
     
     if [ "$zfssizefault" = "false" ]; then
@@ -534,17 +532,25 @@ Suggested mountpoint location: ${HOME}/cryptodisk${SYSTEMEXAMPLE}" 27 75
   
 done
 
-if [ "$mountpoint_exists" = "false" ]; then
-  if [ "$current_user" = "$mountpath_parent_owner" ]; then
-    mkdir -p $MOUNTPATH
-  else
-    sudoitas $mountpath_parent_owner mkdir -p $MOUNTPATH
-  fi
-fi
+dialog --title "Confirm to proceed" --yesno "\nIf you proceed, the encrypted vault will be created with the following parameters you have entered:\n\n
+Vault filesystem: ${CRYPTOFS}\n
+Vault size: ${VAULTSIZEVAL}${VAULTSIZEUNIT}\n
+Vault label: ${CRYPTOVAULTLABEL}\n
+Vault file path: ${VAULTPATH}/${CRYPTOVAULTLABEL} (owned by $vaultpath_parent_owner)\n
+Vault mount path: ${MOUNTPATH} (owned by $mountpath_parent_owner)\n\n
+If the values are not correct, cancel and run the script again.\n\nDo you want to proceed?" 22 80
+ret=$?
+  
+case $ret in
+  0)
+    ;;
+  1)
+    clear && echo -e "\n\e${BWhite}\e${On_Red} SCRIPT WAS CANCELLED \e${Color_Off}\n\n" && exit 1;;
+esac
 
 
 # review..
-echo "Crypto FS: $CRYPTFS"
+echo "Crypto FS: $CRYPTOFS"
 echo "Crypto PWD: $CRYPTPWD"
 echo "Crypto vault size: $VAULTSIZEVAL"
 echo "Crypto vault size unit: $VAULTSIZEUNIT"
@@ -554,7 +560,14 @@ echo "Crypto vault file location ownership: $vaultpath_parent_owner"
 echo "Crypto vault mountpath: $MOUNTPATH"
 echo "Crypto vault mountpath ownership: $mountpath_parent_owner"
 
-# create mount/umount scripts
+#TODO: create mount/umount scripts
 
-echo -e "\e${BWhite}\e${On_Red} ELEVATED: \e${Color_Off} touch /root/testfile25"
-sudoit touch /root/testfile25
+if [ "$mountpoint_exists" = "false" ]; then
+  if [ "$current_user" = "$mountpath_parent_owner" ]; then
+    echo -e "EXECUTING: mkdir -p $MOUNTPATH"
+    mkdir -p $MOUNTPATH
+  else
+    echo -e "EXECUTING \e${BWhite}\e${On_Red} ELEVATED: \e${Color_Off} mkdir -p $MOUNTPATH"
+    sudoitas $mountpath_parent_owner mkdir -p $MOUNTPATH
+  fi
+fi
