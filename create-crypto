@@ -571,3 +571,44 @@ if [ "$mountpoint_exists" = "false" ]; then
     sudoitas $mountpath_parent_owner mkdir -p $MOUNTPATH
   fi
 fi
+
+# CREATE ONLY:
+# dd if=/dev/zero of=crypt-disk-two bs=1M count=128
+
+# CREATE ONLY:
+# sudo cryptsetup luksFormat -q ${VAULTPATH}/${CRYPTOVAULTLABEL}
+
+# CREATE/OPEN:
+# sudo losetup -f`;echo "The loop device in use is ${LDEV}"; sudo losetup $LDEV ${VAULTPATH}/${CRYPTOVAULTLABEL}
+
+# CREATE/OPEN:
+# DNAM=${CRYPTOVAULTLABEL}; LDEV=`sudo losetup --raw | grep $DNAM | awk '{print $1}'`; sudo cryptsetup luksOpen $LDEV $DNAM
+
+# CREATE ONLY:
+# zfs:
+# sudo zpool create -o ashift=12 -O atime=off -O compression=lz4 -O normalization=formD -O mountpoint=/ -m ${MOUNTPATH} cryptopool-${CRYPTOVAULTLABEL} ${VAULTPATH}/${CRYPTOVAULTLABEL}
+# ext4:
+# sudo mkfs.ext4 /dev/mapper/${CRYPTOVAULTLABEL}
+
+# --
+
+# REOPEN:
+
+# sudo zpool import pool-${CRYPTOVAULTLABEL}
+# sudo zpool scrub pool-${CRYPTOVAULTLABEL}
+# -or-
+# sudo mount /dev/mapper/${CRYPTOVAULTLABEL} ${MOUNTPATH}
+
+# --
+
+# CLOSE:
+
+# zfs:
+# sudo zpool export pool-${CRYPTOVAULTLABEL}
+# ext4:
+# umount ${MOUNTPATH} > /dev/null 2>&1
+
+# sudo cryptsetup luksClose /dev/mapper/${CRYPTOVAULTLABEL}
+
+# DNAM=${CRYPTOVAULTLABEL}; LDEV=`sudo losetup --raw | grep $DNAM | awk '{print $1}'`; sudo losetup -d $LDEV
+
