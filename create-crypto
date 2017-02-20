@@ -327,7 +327,6 @@ done
 # VAULT FILE LOCATION
 
 # TODO: Check for existence of file with the same name
-# TODO: normalize slash in the end of VAULT and MOUNT paths
 # TODO: vault file and the mountpoint location should probably be owned by the same user (this check will occur with mountpoint)
 
 while true; do
@@ -340,6 +339,9 @@ NOTE: If a non-existent path is entered, the directory/directories will be creat
 
   VAULTPATH=$(dialog --title "Vault file location selection" --dselect ${HOME}/ 16 60 2>&1 > /dev/tty)
   ret=$?
+
+  #remove slash from the end if there is one
+  VAULTPATH=${VAULTPATH%/}
   
   case $ret in
     0)
@@ -441,6 +443,9 @@ NOTE: Global locations (e.g. /mnt/mountdir) are set up for root access, while us
 
   MOUNTPATH=$(dialog --title "Mount point selection" --dselect ${HOME}/ 16 60 2>&1 > /dev/tty)
   ret=$?
+
+  #remove slash from the end if there is one
+  MOUNTPATH=${MOUNTPATH%/}
   
   case $ret in
     0)
