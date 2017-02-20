@@ -327,7 +327,6 @@ done
 
 
 # VAULT FILE LOCATION
-
 while true; do
   dialog --title "Vault file location selection" --msgbox '\nOn the next screen select the location where you want the vault file to be saved. 
 If this is a system-wide vault, use a path, for example, under /var/ (such as /var/vaultfiles/). For a personal vault, select a location under a home directory (e.g. /home/alice/vaultfiles/).\n\n
@@ -349,8 +348,14 @@ NOTE: If a non-existent path is entered, the directory/directories will be creat
       exit 1;;
   esac
 
-  find_existing_parent vaultpath_existing_parent $VAULTPATH
+  if [ ! -d "$VAULTPATH" ]; then
+    find_existing_parent vaultpath_existing_parent $VAULTPATH
+  else
+    vaultpath_existing_parent=$VAULTPATH
+  fi
+
   find_dir_owner vaultpath_parent_owner $vaultpath_existing_parent
+
   PATHMORE=''
   if [ "$current_user" != "$vaultpath_parent_owner" ]; then
     if [ "$vaultpath_parent_owner" = "root" ]; then
@@ -394,18 +399,31 @@ NOTE: Since vaults are mapped through /dev/mapper system-wide (even when access 
 
   CRYPTOVAULTLABEL=$(echo "${CRYPTOVAULTLABELINPUT// /}")
 
+  vaultname_conflict=false
   mapper_conflict=false
   for i in /dev/mapper/*; do
     thisbase=$(basename $i)
     if [ "$thisbase" = "$CRYPTOVAULTLABEL" ]; then
+      vaultname_conflict=true
       mapper_conflict=true
     fi
   done
 
-#TODO: Check for existence of file with the same name at VAULTPATH
+  for i in $VAULTPATH/*; do
+    thisbase=$(basename $i)
+    if [ "$thisbase" = "$CRYPTOVAULTLABEL" ]; then
+      vaultname_conflict=true
+    fi
+  done
 
-  if [ "$mapper_conflict" = "true" ]; then
-    dialog --title "ERROR" --msgbox "\nThe crypto vault label you have chosen ($CRYPTOVAULTLABEL) conflicts with an already mapped vault. Please choose another label/filename!" 14 50
+  if [ "$vaultname_conflict" = "true" ]; then
+    if [ "$mapper_conflict" = "true" ]; then
+       vaultname_conflict_message="\nThe crypto vault label you have chosen ($CRYPTOVAULTLABEL) conflicts with an already mapped vault.\n\nPlease choose another label/filename!"
+    else
+       vaultname_conflict_message="\nThe crypto vault label you have chosen ($CRYPTOVAULTLABEL) conflicts with an existing vault file at your chosen vault file path ($VAULTPATH).\n\nPlease choose another label/filename!"
+    fi    
+
+    dialog --title "ERROR" --msgbox "$vaultname_conflict_message" 14 50
     ret=$?
   
     case $ret in
@@ -439,7 +457,7 @@ while true; do
 If this is a system-wide vault, use a path under /mnt/. For a personal vault, select a mountpoint under a home directory.\n\n
 NOTE: Use Up/Dn [arrow] to move to move the selector, SPACE to copy selected directory to the edit line, and ENTER to accept the current path in the edit box. 
 To move to subdir/parent, add/remove "/" after the directory name on the edit line.\n\n
-NOTE: If a non-existent path is entered, the directory/directories will be created. Existing but non-empty directories are not accepted.\n\n
+NOTE: If a non-existent path is entered, the directory/directories will be created. Existing but non-empty directories are not accepted. This directory can not be used for other purposes.\n\n
 NOTE: Global locations (e.g. /mnt/mountdir) are set up for root access, while user-owned locations (e.g. /home/alice/mountdir) are set up for the owner of the parent dir (i.e. "alice" in this example).' 25 70
 
   MOUNTPATH=$(dialog --title "Mountpoint selection" --dselect ${HOME}/ 16 60 2>&1 > /dev/tty)
@@ -455,7 +473,11 @@ NOTE: Global locations (e.g. /mnt/mountdir) are set up for root access, while us
       exit 1;;
   esac
 
-  find_existing_parent mountpath_existing_parent $MOUNTPATH
+  if [ ! -d "$MOUNTPATH" ]; then
+    find_existing_parent mountpath_existing_parent $MOUNTPATH
+  else
+    mountpath_existing_parent=$MOUNTPATH
+  fi
   find_dir_owner mountpath_parent_owner $mountpath_existing_parent
 
   DIFF_OWNERS=''
@@ -470,8 +492,12 @@ NOTE: Global locations (e.g. /mnt/mountdir) are set up for root access, while us
     if [ "$(ls -A $MOUNTPATH)" ]; then
       PATHDETAIL="This directory is not empty.\n\nSelect an empty directory, or create new."
     else
-      PATHDETAIL="This directory exists and it is empty."
-      confirm=true
+      if [ "$MOUNTPATH" = "$VAULTPATH" ]; then
+        PATHDETAIL="Vault file path and the mountpoint cannot be the same directory; the mountpoint directory must always remain empty."
+      else    
+        PATHDETAIL="This directory exists and it is empty."
+        confirm=true
+      fi
     fi
   else
     PATHMORE=''
