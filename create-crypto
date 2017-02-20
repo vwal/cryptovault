@@ -297,6 +297,7 @@ while true; do
   fi
 done
 
+
 # VAULT SIZE SELECTION
 while true; do
   CRYPTOVAULTSIZEINPUT=$(dialog --title "Enter desired crypto vault size" --inputbox "\nEnter the desired vault size in\nmegabytes (MB) or gigabytes (GB).\n\nPlease be mindful of the available drive space.\n\n" 14 55 512MB 2>&1 > /dev/tty)
@@ -312,8 +313,8 @@ while true; do
   
   if [[ $CRYPTOVAULTSIZEINPUT =~ ^([0-9]+)[[:space:]]*(MB|Mb|mb|GB|Gb|gb)$ ]] ; then
   
-    #TODO: MIN 128MB CHECK WHEN ZFS IS IN EFFECT
-    #TODO: Available disk space check
+#TODO: MIN 128MB CHECK WHEN ZFS IS IN EFFECT
+#TODO: Available disk space check
   
     VAULTSIZEVAL=${BASH_REMATCH[1]}
     VAULTSIZEUNIT=$(echo "${BASH_REMATCH[2]}" | awk '{print toupper($0)}')
@@ -324,10 +325,8 @@ while true; do
   
 done
 
-# VAULT FILE LOCATION
 
-# TODO: Check for existence of file with the same name
-# TODO: vault file and the mountpoint location should probably be owned by the same user (this check will occur with mountpoint)
+# VAULT FILE LOCATION
 
 while true; do
   dialog --title "Vault file location selection" --msgbox '\nOn the next screen select the location where you want the vault file to be saved. 
@@ -403,6 +402,8 @@ NOTE: Since vaults are mapped through /dev/mapper system-wide (even when access 
     fi
   done
 
+#TODO: Check for existence of file with the same name at VAULTPATH
+
   if [ "$mapper_conflict" = "true" ]; then
     dialog --title "ERROR" --msgbox "\nThe crypto vault label you have chosen ($CRYPTOVAULTLABEL) conflicts with an already mapped vault. Please choose another label/filename!" 14 50
     ret=$?
@@ -441,7 +442,7 @@ To move to subdir/parent, add/remove "/" after the directory name on the edit li
 NOTE: If a non-existent path is entered, the directory/directories will be created. Existing but non-empty directories are not accepted.\n\n
 NOTE: Global locations (e.g. /mnt/mountdir) are set up for root access, while user-owned locations (e.g. /home/alice/mountdir) are set up for the owner of the parent dir (i.e. "alice" in this example).' 25 70
 
-  MOUNTPATH=$(dialog --title "Mount point selection" --dselect ${HOME}/ 16 60 2>&1 > /dev/tty)
+  MOUNTPATH=$(dialog --title "Mountpoint selection" --dselect ${HOME}/ 16 60 2>&1 > /dev/tty)
   ret=$?
 
   #remove slash from the end if there is one
@@ -454,6 +455,14 @@ NOTE: Global locations (e.g. /mnt/mountdir) are set up for root access, while us
       exit 1;;
   esac
 
+  find_existing_parent mountpath_existing_parent $MOUNTPATH
+  find_dir_owner mountpath_parent_owner $mountpath_existing_parent
+
+  DIFF_OWNERS=''
+  if [ "$vaultpath_parent_owner" != "$mountpath_parent_owner" ]; then
+    DIFF_OWNERS="WARNING: THE VAULT FILE PATH ($VAULTPATH), AND THE MOUNTPOINT PATH ($MOUNTPATH) ARE OWNED BY DIFFERENT USERS ($vaultpath_parent_owner and $mountpath_parent_owner respectively). I can proceed, but this is *probably* not what you want!\n\n"
+  fi
+
   PATHDETAIL=
   confirm=false
   mountpoint_exists=true
@@ -465,12 +474,10 @@ NOTE: Global locations (e.g. /mnt/mountdir) are set up for root access, while us
       confirm=true
     fi
   else
-    find_existing_parent mountpath_existing_parent $MOUNTPATH
-    find_dir_owner mountpath_parent_owner $mountpath_existing_parent
     PATHMORE=''
     if [ "$current_user" != "$mountpath_parent_owner" ]; then
       if [ "$mountpath_parent_owner" = "root" ]; then
-        PATHMORE="The selected mount path is a system location, and will be owned by the root user.\n\n"
+        PATHMORE="The selected mountpoint path is a system location, and will be owned by the root user.\n\n"
       else
         PATHMORE="The selected location is owned by user $mountpath_parent_owner, and the mountpoint will be made private to that user.\n\n"
       fi
@@ -482,7 +489,7 @@ NOTE: Global locations (e.g. /mnt/mountdir) are set up for root access, while us
   fi
 
   if [ "$confirm" = "true" ]; then
-    dialog --title "Confirm selected mountpoint" --yesno "\nYou selected mount path:\n\n${MOUNTPATH}\n\n${PATHDETAIL}\n\n${PATHMORE}Is this what you want?" 16 70
+    dialog --title "Confirm selected mountpoint" --yesno "\n${DIFF_OWNERS}You selected mountpoint path:\n\n${MOUNTPATH}\n\n${PATHDETAIL}\n\n${PATHMORE}Is this what you want?" 22 75
     ret=$?
   
     case $ret in
@@ -514,7 +521,7 @@ echo "Crypto vault size: $VAULTSIZEVAL"
 echo "Crypto vault size unit: $VAULTSIZEUNIT"
 echo "Crypto vault label/filename: $CRYPTOVAULTLABEL"
 echo "Crypto vault file location: $VAULTPATH"
-echo "Crypto vault file location ownership: "
+echo "Crypto vault file location ownership: $vaultpath_parent_owner"
 echo "Crypto vault mountpath: $MOUNTPATH"
 echo "Crypto vault mountpath ownership: $mountpath_parent_owner"
 
