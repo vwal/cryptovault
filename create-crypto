@@ -313,6 +313,7 @@ while true; do
   if [[ $CRYPTOVAULTSIZEINPUT =~ ^([0-9]+)[[:space:]]*(MB|Mb|mb|GB|Gb|gb)$ ]] ; then
   
     #TODO: MIN 128MB CHECK WHEN ZFS IS IN EFFECT
+    #TODO: Available disk space check
   
     VAULTSIZEVAL=${BASH_REMATCH[1]}
     VAULTSIZEUNIT=$(echo "${BASH_REMATCH[2]}" | awk '{print toupper($0)}')
@@ -323,14 +324,61 @@ while true; do
   
 done
 
-# VAULT LABEL
+# VAULT FILE (LOCATION)
 
-#TODO: Check for conflicts in /dev/mapper
+# ask for vault file location first so that existence of a same-named file can be checked for when the label/filename is inquired for
+# vault file and the mountpoint location should probably be owned by the same user (this check will occur with mountpoint)
 
 
-# VAULT FILE (LOCATION + FILENAME)
+# VAULT LABEL/FILE NAME
+while true; do
+  CRYPTOVAULTLABELINPUT=$(dialog --title "Crypto Vault Label/File Name" --inputbox "\nEnter the desired vault label (no spaces). It will also be used as the vault file name.\n\n
+NOTE: Since vaults are mapped through /dev/mapper system-wide (even when access is limited to a specific user), the label must be unique.\n" 14 55 2>&1 > /dev/tty)
+  ret=$?
 
-# vault file and the mountpoint location should probably be owned by the same user...
+  # ok (proceed) / cancel
+  case $ret in
+    0)
+      ;;
+    1)
+      exit 1;;
+  esac
+
+  CRYPTOVAULTLABEL=$(echo "${CRYPTOVAULTLABELINPUT// /}")
+
+  mapper_conflict=false
+  for i in /dev/mapper/*; do
+    thisbase=$(basename $i)
+    if [ "$thisbase" = "$CRYPTOVAULTLABEL" ]; then
+      mapper_conflict=true
+    fi
+  done
+
+  if [ "$mapper_conflict" = "true" ]; then
+    dialog --title "ERROR" --msgbox "\nThe crypto vault label you have chosen ($CRYPTOVAULTLABEL) conflicts with an already mapped vault. Please choose another label/filename!" 14 50
+    ret=$?
+  
+    case $ret in
+      0)
+        ;;
+      1)
+        exit 1;;
+    esac
+
+  else
+    dialog --title "Confirm selected label/filename" --yesno "\nYou selected vault label / file name:\n\n${CRYPTOVAULTLABEL}\n\nIs this what you want?" 16 70
+    ret=$?
+  
+    case $ret in
+      0)
+        break;;
+      1)
+        ;;
+    esac
+
+  fi
+
+done
 
 
 # VAULT MOUNTPOINT
@@ -368,7 +416,11 @@ NOTE: Global locations (e.g. /mnt/mountdir) are set up for root access, while us
     find_dir_owner mountpath_parent_owner $mountpath_existing_parent
     PATHMORE=''
     if [ "$current_user" != "$mountpath_parent_owner" ]; then
-      PATHMORE="The selected location is owned by user $mountpath_parent_owner, and the mountpoint will be made private to that user.\n\n"
+      if [ "$mountpath_parent_owner" = "root" ]; then
+        PATHMORE="The selected mount path is a system location, and will be owned by the root user.\n\n"
+      else
+        PATHMORE="The selected location is owned by user $mountpath_parent_owner, and the mountpoint will be made private to that user.\n\n"
+      fi
     fi
 
     PATHDETAIL="This directory does not exist; it will be created."
@@ -407,8 +459,7 @@ echo "Crypto FS: $CRYPTFS"
 echo "Crypto PWD: $CRYPTPWD"
 echo "Crypto vault size: $VAULTSIZEVAL"
 echo "Crypto vault size unit: $VAULTSIZEUNIT"
-echo "Crypto vault label: "
-echo "Crypto vault filename: "
+echo "Crypto vault label/filename: $CRYPTOVAULTLABEL"
 echo "Crypto vault file location: "
 echo "Crypto vault file location ownership: "
 echo "Crypto vault mountpath: $MOUNTPATH"
