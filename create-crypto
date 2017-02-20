@@ -213,21 +213,7 @@ This script requires cryptsetup. Install it first with 'sudo apt-get install cry
 fi
 
 
-# QUERY DISK DETAILS
-
-# file system ext4 / zfs
-#  -> check that zfsutils-linux is installed if zfs is selected
-# cryptdisk file location
-#  -> check write permissions user/sudo
-# http://stackoverflow.com/questions/14103806/bash-test-if-a-directory-is-writable-by-a-given-uid
-# disk file size
-#  -> check min filesize of 128MB
-#  -> check available disk space for the requested disk size
-# cryptdisk label (suggest same as filename), but check /dev/mapper for active name conflicts
-# disk password (2x)
-
-
-# MAIN LOGIC: QUERY VAULT PARAMETERS
+# MAIN LOGIC: QUERY VAULT PARAMETERS =========================================
 
 # FILE SYSTEM SELECTION
 CRYPTFSSEL=$(dialog --title "Select crypto vault file system" --radiolist "\nSelect the file system for the encrypted vault.\nZFS is recommended for multiple reasons.\n\n" 12 55 2 \
@@ -312,13 +298,22 @@ while true; do
   esac
   
   if [[ $CRYPTOVAULTSIZEINPUT =~ ^([0-9]+)[[:space:]]*(MB|Mb|mb|GB|Gb|gb)$ ]] ; then
-  
-#TODO: MIN 128MB CHECK WHEN ZFS IS IN EFFECT
-#TODO: Available disk space check
-  
     VAULTSIZEVAL=${BASH_REMATCH[1]}
     VAULTSIZEUNIT=$(echo "${BASH_REMATCH[2]}" | awk '{print toupper($0)}')
-    break
+
+    zfssizefault=false
+    if [ "$CRYPTFS" = "zfs" ]; then
+      if [ "$VAULTSIZEUNIT" = "MB" ]; then
+        if [ $VAULTSIZEVAL -lt 128 ]; then
+          zfssizefault=true
+          dialog --title "ERROR" --msgbox '\nZFS filesystem requires minimum vault size of 128MB!' 8 60
+        fi
+      fi
+    fi
+    
+    if [ "$zfssizefault" = "false" ]; then
+      break
+    fi
   else
     dialog --title "ERROR" --msgbox '\nUnacceptable vault size!\n\nPlease enter the numeric size (integers only), followed by "MB" or "GB"!' 14 50
   fi
@@ -361,7 +356,7 @@ NOTE: If a non-existent path is entered, the directory/directories will be creat
     if [ "$vaultpath_parent_owner" = "root" ]; then
       PATHMORE="The selected location a system location, and will be owned by the root user.\n\n"
     else
-      PATHMORE="The selected location is owned by user $vaultpath_parent_owner, and the vault file will be made private to that user.\n\n"
+      PATHMORE="The selected location is owned by user \"$vaultpath_parent_owner\", and the vault file will be made private to that user.\n\n"
     fi
   fi
 
@@ -451,7 +446,6 @@ done
 
 
 # VAULT MOUNTPOINT
-
 while true; do
   dialog --title "Mountpoint selection" --msgbox '\nOn the next screen select the location where you want the vault to be mounted when opened. 
 If this is a system-wide vault, use a path under /mnt/. For a personal vault, select a mountpoint under a home directory.\n\n
@@ -482,7 +476,7 @@ NOTE: Global locations (e.g. /mnt/mountdir) are set up for root access, while us
 
   DIFF_OWNERS=''
   if [ "$vaultpath_parent_owner" != "$mountpath_parent_owner" ]; then
-    DIFF_OWNERS="WARNING: THE VAULT FILE PATH ($VAULTPATH), AND THE MOUNTPOINT PATH ($MOUNTPATH) ARE OWNED BY DIFFERENT USERS ($vaultpath_parent_owner and $mountpath_parent_owner respectively). I can proceed, but this is *probably* not what you want!\n\n"
+    DIFF_OWNERS="WARNING: THE VAULT FILE PATH ($VAULTPATH), AND THE MOUNTPOINT PATH ($MOUNTPATH) ARE OWNED BY DIFFERENT USERS (\"$vaultpath_parent_owner\" and \"$mountpath_parent_owner\", respectively). I can proceed, but this is *probably* not what you want!\n\n"
   fi
 
   PATHDETAIL=
@@ -505,7 +499,7 @@ NOTE: Global locations (e.g. /mnt/mountdir) are set up for root access, while us
       if [ "$mountpath_parent_owner" = "root" ]; then
         PATHMORE="The selected mountpoint path is a system location, and will be owned by the root user.\n\n"
       else
-        PATHMORE="The selected location is owned by user $mountpath_parent_owner, and the mountpoint will be made private to that user.\n\n"
+        PATHMORE="The selected location is owned by user \"$mountpath_parent_owner\", and the mountpoint will be made private to that user.\n\n"
       fi
     fi
 
