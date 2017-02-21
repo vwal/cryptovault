@@ -197,15 +197,28 @@ cleanup()
 {
   echo
   echo -e "\e${BIRed}Cleaning up after interrupt...\e${Color_Off}"  
+
+  # export zfs pool, umount ext4 fs
+  if [ "$CRYPTOFS" = "zfs" ]; then
+    sudoit zpool export $cryptopool
+    echo "zfs pool exported."
+  else
+    sudoit umount ${MOUNTPATH}
+    echo "ext4 filesystem unmounted at ${MOUNTPATH}."
+  fi  
+
+  # remove mapped disk
   if [ -b /dev/mapper/${CRYPTOVAULTLABEL} ]; then
     sudoit cryptsetup luksClose /dev/mapper/${CRYPTOVAULTLABEL}
-    echo "Mapped device removed."
+    echo "Mapped device /dev/mapper/${CRYPTOVAULTLABEL} removed."
   fi
 
   if ! sudo -n true 2>/dev/null; then 
     echo -e "\e${IYellow}This operation requires you to re-enter your sudo password below:\e${Color_Off}"
   fi 
+  # acquire loop device
   loopdev2del=`sudo losetup --raw | grep ${VAULTPATH}/${CRYPTOVAULTLABEL} | awk '{print $1}'`
+  # delete loop device
   if [ "$loopdev2del" != "" ]; then
     sudoit losetup -d $loopdev2del > /dev/null 2>&1
     echo "Loop device $loopdev2del removed."
@@ -244,7 +257,8 @@ fi
 # MAIN LOGIC: QUERY VAULT PARAMETERS =========================================
 
 # FILE SYSTEM SELECTION
-CRYPTOFSSEL=$(dialog --title "Select crypto vault file system" --radiolist "\nSelect the file system for the encrypted vault.\nZFS is recommended for multiple reasons.\n\n" 12 55 2 \
+CRYPTOFSSEL=$(dialog --title "Select crypto vault file system" --radiolist "\nSelect the file system for the encrypted vault.\nZFS is recommended for multiple reasons.\n\n
+NOTE: Highlight the choice with up/down arrow, select with SPACE." 20 55 2 \
             1 zfs on \
             2 ext4 off \
           2>&1 > /dev/tty)
@@ -698,6 +712,34 @@ sudoit $executable
 
 echo
 
+# create and mount the filesystem
+echo -e "\e${BIWhite}Creating the ${CRYPTOFS} filesystem...\e${Color_Off}"
+if [ "$CRYPTOFS" = "zfs" ]; then
+  cryptopool="cryptopool-${CRYPTOVAULTLABEL}"
+  echo "Cryptopool is: $cryptopool"
+  executable="zpool create -o ashift=12 -O atime=off -O compression=lz4 -O normalization=formD -O mountpoint=/ -m ${MOUNTPATH} $cryptopool /dev/mapper/${CRYPTOVAULTLABEL}"
+  echo -e "${executing}$elevated: $executable"  
+  sudoit $executable
+else
+  executable="mkfs.ext4 /dev/mapper/${CRYPTOVAULTLABEL}"
+  echo -e "${executing}$elevated: $executable"
+  sudoit $executable
+  executable_mount="mount /dev/mapper/${CRYPTOVAULTLABEL} ${MOUNTPATH}"
+  echo "Mounting ext4 filesystem.."
+  echo -e "${executing}$elevated: $executable_mount"
+  sudoit $executable_mount
+fi
+if [ "$mountpath_owner" != "root" ]; then
+  echo "Setting mountpoint permissions.."
+  sudoit chmod 770 ${MOUNTPATH}
+  sudoit chown -R ${mountpath_owner} ${MOUNTPATH}
+fi
+
+echo 
+
+echo "Complete."
+
+echo
 
 #-- dev
 
@@ -729,7 +771,7 @@ esac
 # CREATE/OPEN: ✔
 # DNAM=${CRYPTOVAULTLABEL}; LDEV=`sudo losetup --raw | grep $DNAM | awk '{print $1}'`; sudo cryptsetup luksOpen $LDEV $DNAM
 
-# CREATE ONLY:
+# CREATE ONLY: ✔
 # zfs:
 # sudo zpool create -o ashift=12 -O atime=off -O compression=lz4 -O normalization=formD -O mountpoint=/ -m ${MOUNTPATH} cryptopool-${CRYPTOVAULTLABEL} ${VAULTPATH}/${CRYPTOVAULTLABEL}
 # ext4:
