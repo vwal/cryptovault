@@ -112,7 +112,7 @@ get_sudo_pwd()
 {
   # get password
   while true; do
-    SUDOPWD=$(dialog --title "Enter sudo password" --insecure --passwordbox "\nThis script requires sudo access. Please enter your sudo password (your login password) to be used for the elevated script operations. The password will be cached internally by this script.\n\n" 14 50  2>&1 > /dev/tty)
+    SUDOPWD=$(dialog --title "Enter sudo password" --insecure --passwordbox "\nThis script requires sudo access. Please enter your sudo password (your login password) to be used for the elevated script operations. The password will be cached internally by this script, but depending on your system policy, you may be re-prompted for sudo password later.\n\n" 13 60  2>&1 > /dev/tty)
     ret=$?
 
     sudo -k
@@ -512,33 +512,35 @@ Suggested mountpoint location: ${HOME}/cryptodisk${SYSTEMEXAMPLE}" 27 75
     DIFF_OWNERS="WARNING: THE VAULT FILE PATH ($VAULTPATH), AND THE MOUNTPOINT PATH ($MOUNTPATH) ARE OWNED BY DIFFERENT USERS (\"$vaultpath_owner\" and \"$mountpath_owner\", respectively). I can proceed, but this is *probably* not what you want!\n\n"
   fi
 
+
+
   PATHDETAIL=
   confirm=false
   mountpoint_exists=true
-  if [ -d "$MOUNTPATH" ]; then
-    if [ "$(ls -A $MOUNTPATH)" ]; then
-      PATHDETAIL="This directory is not empty.\n\nSelect an empty directory, or create new."
-    else
-      if [ "$MOUNTPATH" = "$VAULTPATH" ]; then
-        PATHDETAIL="Vault file path and the mountpoint cannot be the same directory; the mountpoint directory must always remain empty."
-      else    
+  if [ "$MOUNTPATH" = "$VAULTPATH" ]; then
+    PATHDETAIL="Vault file path and the mountpoint cannot be the same directory; the mountpoint directory must always remain empty."
+  else    
+    if [ -d "$MOUNTPATH" ]; then
+      if [ "$(ls -A $MOUNTPATH)" ]; then
+        PATHDETAIL="This directory is not empty.\n\nSelect an empty directory, or create new."
+      else
         PATHDETAIL="This directory exists and it is empty."
         confirm=true
       fi
-    fi
-  else
-    PATHMORE=''
-    if [ "$current_user" != "$mountpath_owner" ]; then
-      if [ "$mountpath_owner" = "root" ]; then
-        PATHMORE="The selected mountpoint path is a system location, and will be owned by the root user.\n\n"
-      else
-        PATHMORE="The selected location is owned by user \"$mountpath_owner\", and the mountpoint will be made private to that user.\n\n"
+    else
+      PATHMORE=''
+      if [ "$current_user" != "$mountpath_owner" ]; then
+        if [ "$mountpath_owner" = "root" ]; then
+          PATHMORE="The selected mountpoint path is a system location, and will be owned by the root user.\n\n"
+        else
+          PATHMORE="The selected location is owned by user \"$mountpath_owner\", and the mountpoint will be made private to that user.\n\n"
+        fi
       fi
-    fi
 
-    PATHDETAIL="This directory does not exist; it will be created."
-    confirm=true
-    mountpoint_exists=false
+      PATHDETAIL="This directory does not exist; it will be created."
+      confirm=true
+      mountpoint_exists=false
+    fi
   fi
 
   if [ "$confirm" = "true" ]; then
@@ -691,7 +693,7 @@ echo
 echo -e "\e${BIWhite}Opening the mapped device...\e${Color_Off}"
 executable="cryptsetup luksOpen $loopdev ${CRYPTOVAULTLABEL}"
 echo -e "${executing}$elevated: $executable"
-echo -e "\e${IYellow}The encrypted device is being opened. Please enter below the encryption password you selected earlier in the process:\e${Color_Off}"
+echo -e "\e${IYellow}The encrypted device is being opened. Please enter below the encryption password\nyou selected earlier in the process (NOTE: typed characters will not echo).\e${Color_Off}"
 sudoit $executable
 
 echo
