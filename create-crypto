@@ -102,7 +102,6 @@ exists()
 validate_sudopwd()
 {
   if [ "$is_sudo" = "1" ] ; then
-    clear
     break
   else
     dialog --title "ERROR" --msgbox "\nINCORRECT SUDO PASSWORD!\n\nPlease try again!" 9 30
@@ -192,6 +191,28 @@ find_dir_owner()
 {
   dirowner=$(ls -ld $2 | awk '{print $3}')
   eval "$1=$dirowner"
+}
+
+cleanup()
+{
+  echo
+  echo -e "\e${BIRed}Cleaning up after interrupt...\e${Color_Off}"  
+  if [ -b /dev/mapper/${CRYPTOVAULTLABEL} ]; then
+    sudoit cryptsetup luksClose /dev/mapper/${CRYPTOVAULTLABEL}
+    echo "Mapped device removed."
+  fi
+
+  if ! sudo -n true 2>/dev/null; then 
+    echo -e "\e${IYellow}This operation requires you to re-enter your sudo password below:\e${Color_Off}"
+  fi 
+  loopdev2del=`sudo losetup --raw | grep ${VAULTPATH}/${CRYPTOVAULTLABEL} | awk '{print $1}'`
+  if [ "$loopdev2del" != "" ]; then
+    sudoit losetup -d $loopdev2del > /dev/null 2>&1
+    echo "Loop device $loopdev2del removed."
+  fi
+  echo "Exiting.."
+  echo
+  exit 1
 }
 
 # PREREQS CHECKS =============================================================
@@ -555,7 +576,9 @@ esac
 
 # MAIN LOGIC: CREATE PATHS AND THE DISK ======================================
 
-# review..
+clear 
+
+#-- dev
 echo "Crypto FS: $CRYPTOFS"
 echo "Crypto PWD: $CRYPTPWD"
 echo "Crypto vault size: $VAULTSIZEVAL"
@@ -565,39 +588,51 @@ echo "Crypto vault file location: $VAULTPATH"
 echo "Crypto vault file location ownership: $vaultpath_owner"
 echo "Crypto vault mountpath: $MOUNTPATH"
 echo "Crypto vault mountpath ownership: $mountpath_owner"
+echo
+echo --
+#-- dev
 
-clear
 echo
 
-#TODO: create mount/umount scripts
+trap cleanup INT ERR
 
-elevated="\e${BWhite}\e${On_Red}ELEVATED\e${Color_Off}"
+executing="\e${BGreen}EXECUTING\e${Color_Off}"
+if [ "$im_root" = "0" ]; then
+  elevated=" \e${Black}\e${On_Green}ELEVATED\e${Color_Off}"
+else
+  elevated=''
+fi
+
+#TODO: Check on each step that the previous one has completed successfully
 
 # create vault path
 if [ "$vaultpath_exists" = "false" ]; then
+  echo -e "\e${BIWhite}Creating vault path...\e${Color_Off}"
+  executable="mkdir -p $VAULTPATH"
   if [ "$vaultpath_owner" = "$current_user" ]; then
-    echo -e "EXECUTING: mkdir -p $VAULTPATH"
-    mkdir -p $VAULTPATH
+    echo -e "$executing: $executable"
+    eval $executable
   else
-    echo -e "EXECUTING $elevated (as $vaultpath_owner): mkdir -p $VAULTPATH"
-    sudoitas $vaultpath_owner mkdir -p $VAULTPATH
+    echo -e "${executing}$elevated (as $vaultpath_owner): $executable"
+    sudoitas $vaultpath_owner $executable
   fi
 fi
 
 echo
 
 # create blank vault container file
+echo -e "\e${BIWhite}Creating blank vault container file...\e${Color_Off}"
 if [ "$VAULTSIZEUNIT" = "GB" ]; then
-  vaultsize=$VAULTSIZEVAL*1024
+  let vaultsize=$VAULTSIZEVAL*1024
 else
   vaultsize=$VAULTSIZEVAL
 fi
-executable="dd if=/dev/zero of=$VAULTPATH/$CRYPTOVAULTLABEL bs=1M count=$vaultsize"
+executable="dd if=/dev/zero of=${VAULTPATH}/${CRYPTOVAULTLABEL} bs=1M count=$vaultsize"
 if [ "$vaultpath_owner" = "$current_user" ]; then
-  echo -e "EXECUTING: $executable"
+  echo -e "$executing: $executable"
   eval $executable
 else
-  echo -e "EXECUTING $elevated (as $vaultpath_owner): $executable"
+  echo -e "${executing}$elevated (as $vaultpath_owner): $executable"
   sudoitas $vaultpath_owner $executable
 fi
 
@@ -605,28 +640,91 @@ echo
 
 # create mountpoint path
 if [ "$mountpoint_exists" = "false" ]; then
+  echo -e "\e${BIWhite}Creating mountpoint path...\e${Color_Off}"
   executable="mkdir -p $MOUNTPATH"
   if [ "$mountpath_owner" = "$current_user" ]; then
-    echo -e "EXECUTING: $executable"
+    echo -e "$executing: $executable"
     eval $executable
   else
-    echo -e "EXECUTING $elevated (as $mountpath_owner): mkdir -p $MOUNTPATH"
+    echo -e "${executing}$elevated (as $mountpath_owner): $executable"
     sudoitas $mountpath_owner $executable
   fi
 fi
 
 echo
 
-# CREATE ONLY:
+# format the container
+if [ -f ${VAULTPATH}/${CRYPTOVAULTLABEL} ]; then
+  echo -e "\e${BIWhite}Formatting the container with encrypted LUKS filesystem...\e${Color_Off}"
+  echo -e "${executing}$elevated: cryptsetup luksFormat -q ${VAULTPATH}/${CRYPTOVAULTLABEL}"
+
+  if [ "$im_root" -eq 0 ] ; then
+    if ! sudo -n true 2>/dev/null; then 
+      echo -e "\e${IYellow}This operation requires you to re-enter your sudo password below:\e${Color_Off}"
+    fi
+    echo -n "$CRYPTPWD" | sudo cryptsetup luksFormat -q ${VAULTPATH}/${CRYPTOVAULTLABEL} -
+  else
+    # running as root, no sudo needed (even when creting for a different user, this is only access to cryptsetup command)
+    echo -n "$CRYPTPWD" | cryptsetup luksFormat -q ${VAULTPATH}/${CRYPTOVAULTLABEL} -
+  fi
+else
+  echo -e "\e${BWhite}\e${On_Red}Vault file was not created. Unable to proceed.\e${Color_Off}"
+  exit 1
+fi
+
+echo
+
+# set up the loop device
+echo -e "\e${BIWhite}Setting up the loop device...\e${Color_Off}"
+if ! sudo -n true 2>/dev/null; then 
+  echo -e "\e${IYellow}This operation requires you to re-enter your sudo password below:\e${Color_Off}"
+fi
+loopdev=`sudo losetup -f`
+echo "Using loop device: $loopdev"
+executable="losetup $loopdev ${VAULTPATH}/${CRYPTOVAULTLABEL}"
+echo -e "${executing}$elevated: $executable"
+sudoit $executable
+
+echo
+
+# open the mapped loop device (req. selected encryption password)
+echo -e "\e${BIWhite}Opening the mapped device...\e${Color_Off}"
+executable="cryptsetup luksOpen $loopdev ${CRYPTOVAULTLABEL}"
+echo -e "${executing}$elevated: $executable"
+echo -e "\e${IYellow}The encrypted device is being opened. Please enter below the encryption password you selected earlier in the process:\e${Color_Off}"
+sudoit $executable
+
+echo
+
+
+#-- dev
+
+read -p "Press any key to continue... " -n1 -s
+
+dialog --title "Remove map/loop devices" --yesno "\nRemove created map and loop devices?" 10 50
+ret=$?
+  
+case $ret in
+  0)
+    cleanup;;
+  1)
+    ;;
+esac
+
+#-- dev
+
+
+
+# CREATE ONLY: ✔
 # dd if=/dev/zero of=crypt-disk-two bs=1M count=128
 
-# CREATE ONLY:
+# CREATE ONLY: ✔
 # sudo cryptsetup luksFormat -q ${VAULTPATH}/${CRYPTOVAULTLABEL}
 
-# CREATE/OPEN:
+# CREATE/OPEN: ✔
 # sudo losetup -f`;echo "The loop device in use is ${LDEV}"; sudo losetup $LDEV ${VAULTPATH}/${CRYPTOVAULTLABEL}
 
-# CREATE/OPEN:
+# CREATE/OPEN: ✔
 # DNAM=${CRYPTOVAULTLABEL}; LDEV=`sudo losetup --raw | grep $DNAM | awk '{print $1}'`; sudo cryptsetup luksOpen $LDEV $DNAM
 
 # CREATE ONLY:
@@ -657,3 +755,4 @@ echo
 
 # DNAM=${CRYPTOVAULTLABEL}; LDEV=`sudo losetup --raw | grep $DNAM | awk '{print $1}'`; sudo losetup -d $LDEV
 
+#TODO: create mount/umount scripts
