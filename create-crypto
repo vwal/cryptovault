@@ -136,6 +136,7 @@ get_sudo_pwd()
   done
 }
 
+# sudo for system operations
 # use the locally cached sudo password if sudo doesn't cache the password by policy (or if it has expired)
 sudoit()
 {
@@ -151,6 +152,8 @@ sudoit()
   fi
 }
 
+# always sudo because executing as a different user
+# use the locally cached sudo password if sudo doesn't cache the password by policy (or if it has expired)
 sudoitas()
 {
   sudo_user=$1
@@ -191,7 +194,7 @@ find_dir_owner()
   eval "$1=$dirowner"
 }
 
-# INITIAL CHECKS =============================================================
+# PREREQS CHECKS =============================================================
 
 if ! exists dialog ; then
   printf "\n*************************************************************************************************\n\
@@ -353,20 +356,22 @@ Suggested vault file location: ${HOME}/vaultfiles${SYSTEMEXAMPLE}" 25 75
   esac
 
   find_existing_parent vaultpath_existing_parent $VAULTPATH
-  find_dir_owner vaultpath_parent_owner $vaultpath_existing_parent
+  find_dir_owner vaultpath_owner $vaultpath_existing_parent
 
   PATHMORE=''
-  if [ "$current_user" != "$vaultpath_parent_owner" ]; then
-    if [ "$vaultpath_parent_owner" = "root" ]; then
+  if [ "$current_user" != "$vaultpath_owner" ]; then
+    if [ "$vaultpath_owner" = "root" ]; then
       PATHMORE="The selected location a system location, and will be owned by the root user.\n\n"
     else
-      PATHMORE="The selected location is owned by user \"$vaultpath_parent_owner\", and the vault file will be made private to that user.\n\n"
+      PATHMORE="The selected location is owned by user \"$vaultpath_owner\", and the vault file will be made private to that user.\n\n"
     fi
   fi
 
   PATHDETAIL=''
+  vaultpath_exists=true
   if [ ! -d "$VAULTPATH" ]; then
     PATHDETAIL="This directory does not exist; it will be created."
+    vaultpath_exists=false
   fi
 
   dialog --title "Confirm selected vault file location" --yesno "\nYou selected vault file location:\n\n${VAULTPATH}\n\n${PATHDETAIL}\n\n${PATHMORE}Is this what you want?" 16 70
@@ -479,11 +484,11 @@ Suggested mountpoint location: ${HOME}/cryptodisk${SYSTEMEXAMPLE}" 27 75
   esac
 
   find_existing_parent mountpath_existing_parent $MOUNTPATH
-  find_dir_owner mountpath_parent_owner $mountpath_existing_parent
+  find_dir_owner mountpath_owner $mountpath_existing_parent
 
   DIFF_OWNERS=''
-  if [ "$vaultpath_parent_owner" != "$mountpath_parent_owner" ]; then
-    DIFF_OWNERS="WARNING: THE VAULT FILE PATH ($VAULTPATH), AND THE MOUNTPOINT PATH ($MOUNTPATH) ARE OWNED BY DIFFERENT USERS (\"$vaultpath_parent_owner\" and \"$mountpath_parent_owner\", respectively). I can proceed, but this is *probably* not what you want!\n\n"
+  if [ "$vaultpath_owner" != "$mountpath_owner" ]; then
+    DIFF_OWNERS="WARNING: THE VAULT FILE PATH ($VAULTPATH), AND THE MOUNTPOINT PATH ($MOUNTPATH) ARE OWNED BY DIFFERENT USERS (\"$vaultpath_owner\" and \"$mountpath_owner\", respectively). I can proceed, but this is *probably* not what you want!\n\n"
   fi
 
   PATHDETAIL=
@@ -502,11 +507,11 @@ Suggested mountpoint location: ${HOME}/cryptodisk${SYSTEMEXAMPLE}" 27 75
     fi
   else
     PATHMORE=''
-    if [ "$current_user" != "$mountpath_parent_owner" ]; then
-      if [ "$mountpath_parent_owner" = "root" ]; then
+    if [ "$current_user" != "$mountpath_owner" ]; then
+      if [ "$mountpath_owner" = "root" ]; then
         PATHMORE="The selected mountpoint path is a system location, and will be owned by the root user.\n\n"
       else
-        PATHMORE="The selected location is owned by user \"$mountpath_parent_owner\", and the mountpoint will be made private to that user.\n\n"
+        PATHMORE="The selected location is owned by user \"$mountpath_owner\", and the mountpoint will be made private to that user.\n\n"
       fi
     fi
 
@@ -536,8 +541,8 @@ dialog --title "Confirm to proceed" --yesno "\nIf you proceed, the encrypted vau
 Vault filesystem: ${CRYPTOFS}\n
 Vault size: ${VAULTSIZEVAL}${VAULTSIZEUNIT}\n
 Vault label: ${CRYPTOVAULTLABEL}\n
-Vault file path: ${VAULTPATH}/${CRYPTOVAULTLABEL} (owned by $vaultpath_parent_owner)\n
-Vault mount path: ${MOUNTPATH} (owned by $mountpath_parent_owner)\n\n
+Vault file path: ${VAULTPATH}/${CRYPTOVAULTLABEL} (owned by $vaultpath_owner)\n
+Vault mount path: ${MOUNTPATH} (owned by $mountpath_owner)\n\n
 If the values are not correct, cancel and run the script again.\n\nDo you want to proceed?" 22 80
 ret=$?
   
@@ -548,6 +553,7 @@ case $ret in
     clear && echo -e "\n\e${BWhite}\e${On_Red} SCRIPT WAS CANCELLED \e${Color_Off}\n\n" && exit 1;;
 esac
 
+# MAIN LOGIC: CREATE PATHS AND THE DISK ======================================
 
 # review..
 echo "Crypto FS: $CRYPTOFS"
@@ -556,21 +562,60 @@ echo "Crypto vault size: $VAULTSIZEVAL"
 echo "Crypto vault size unit: $VAULTSIZEUNIT"
 echo "Crypto vault label/filename: $CRYPTOVAULTLABEL"
 echo "Crypto vault file location: $VAULTPATH"
-echo "Crypto vault file location ownership: $vaultpath_parent_owner"
+echo "Crypto vault file location ownership: $vaultpath_owner"
 echo "Crypto vault mountpath: $MOUNTPATH"
-echo "Crypto vault mountpath ownership: $mountpath_parent_owner"
+echo "Crypto vault mountpath ownership: $mountpath_owner"
+
+clear
+echo
 
 #TODO: create mount/umount scripts
 
-if [ "$mountpoint_exists" = "false" ]; then
-  if [ "$current_user" = "$mountpath_parent_owner" ]; then
-    echo -e "EXECUTING: mkdir -p $MOUNTPATH"
-    mkdir -p $MOUNTPATH
+elevated="\e${BWhite}\e${On_Red}ELEVATED\e${Color_Off}"
+
+# create vault path
+if [ "$vaultpath_exists" = "false" ]; then
+  if [ "$vaultpath_owner" = "$current_user" ]; then
+    echo -e "EXECUTING: mkdir -p $VAULTPATH"
+    mkdir -p $VAULTPATH
   else
-    echo -e "EXECUTING \e${BWhite}\e${On_Red} ELEVATED: \e${Color_Off} mkdir -p $MOUNTPATH"
-    sudoitas $mountpath_parent_owner mkdir -p $MOUNTPATH
+    echo -e "EXECUTING $elevated (as $vaultpath_owner): mkdir -p $VAULTPATH"
+    sudoitas $vaultpath_owner mkdir -p $VAULTPATH
   fi
 fi
+
+echo
+
+# create blank vault container file
+if [ "$VAULTSIZEUNIT" = "GB" ]; then
+  vaultsize=$VAULTSIZEVAL*1024
+else
+  vaultsize=$VAULTSIZEVAL
+fi
+executable="dd if=/dev/zero of=$VAULTPATH/$CRYPTOVAULTLABEL bs=1M count=$vaultsize"
+if [ "$vaultpath_owner" = "$current_user" ]; then
+  echo -e "EXECUTING: $executable"
+  eval $executable
+else
+  echo -e "EXECUTING $elevated (as $vaultpath_owner): $executable"
+  sudoitas $vaultpath_owner $executable
+fi
+
+echo
+
+# create mountpoint path
+if [ "$mountpoint_exists" = "false" ]; then
+  executable="mkdir -p $MOUNTPATH"
+  if [ "$mountpath_owner" = "$current_user" ]; then
+    echo -e "EXECUTING: $executable"
+    eval $executable
+  else
+    echo -e "EXECUTING $elevated (as $mountpath_owner): mkdir -p $MOUNTPATH"
+    sudoitas $mountpath_owner $executable
+  fi
+fi
+
+echo
 
 # CREATE ONLY:
 # dd if=/dev/zero of=crypt-disk-two bs=1M count=128
