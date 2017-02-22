@@ -199,12 +199,41 @@ cleanup()
   echo -e "\e${BIRed}Cleaning up after interrupt...\e${Color_Off}"  
 
   # export zfs pool, umount ext4 fs
+  dismounted="false"
   if [ "$CRYPTOFS" = "zfs" ]; then
-    sudoit zpool export $cryptopool
+
+    while [ "$dismounted" = "false" ]; do
+      sudoit zpool export $zpool_id
+      if [ $? -ne 0 ]; then
+        echo "Unable to unmount the disk; device is busy. Free the device and try again."
+        echo "The following process(es) hold the mount:"
+        x=(); for a in $(mount | cut -d' ' -f3); do test -e "$a" || x+=("-e$a"); done
+        lsof "${x[@]}" -f -- ${MOUNTPATH}
+        echo
+        read -p "Press any key to retry unmount! " -n1 -s
+      else
+        dismounted="true"
+      fi
+    done
     echo "zfs pool exported."
+
   else
-    sudoit umount ${MOUNTPATH}
+
+    while [ "$dismounted" = "false" ]; do
+      sudoit umount ${MOUNTPATH}
+      if [ $? -ne 0 ]; then
+          echo "Unable to unmount the disk; device is busy. Free the device and try again."
+          echo "The following process(es) hold the mount:"
+          x=(); for a in $(mount | cut -d' ' -f3); do test -e "$a" || x+=("-e$a"); done
+          lsof "${x[@]}" -f -- ${MOUNTPATH}
+          echo
+          read -p "Press any key to retry unmount! " -n1 -s
+      else
+        dismounted="true"
+      fi
+    done
     echo "ext4 filesystem unmounted at ${MOUNTPATH}."
+    
   fi  
 
   # remove mapped disk
@@ -722,36 +751,36 @@ echo
 # create and mount the filesystem
 echo -e "\e${BIWhite}Creating the ${CRYPTOFS} filesystem...\e${Color_Off}"
 if [ "$CRYPTOFS" = "zfs" ]; then
-  cryptopool="cryptopool-${CRYPTOVAULTLABEL}"
-  echo "Cryptopool is: $cryptopool"
-  executable="zpool create -o ashift=12 -O atime=off -O compression=lz4 -O normalization=formD -O mountpoint=/ -m ${MOUNTPATH} $cryptopool /dev/mapper/${CRYPTOVAULTLABEL}"
+  zpool_id="zpool-${CRYPTOVAULTLABEL}"
+  echo "zpool ID for this cryptodisk is: $zpool_id"
+  executable="zpool create -o ashift=12 -O atime=off -O compression=lz4 -O normalization=formD -O mountpoint=/ -m ${MOUNTPATH} $zpool_id /dev/mapper/${CRYPTOVAULTLABEL}"
   echo -e "${executing}$elevated: $executable"  
   sudoit $executable
-  echo "Currently mounted zfs pools on this system:"
+  echo "Currently mounted zfs filesystems:"
   sudoit zfs list
 else
   executable="mkfs.ext4 /dev/mapper/${CRYPTOVAULTLABEL}"
   echo -e "${executing}$elevated: $executable"
   sudoit $executable
   executable_mount="mount /dev/mapper/${CRYPTOVAULTLABEL} ${MOUNTPATH}"
-  echo "Mounting ext4 filesystem.."
+  echo "Mounting ext4 filesystem..."
   echo -e "${executing}$elevated: $executable_mount"
   sudoit $executable_mount
 fi
 
 # test mount
-mounttest=`mount | grep --color=never $cryptopool`
+mounttest=`mount | grep --color=never "$zpool_id"`
 if [ "${mounttest}" = "" ]; then
   echo -e "\e${BWhite}\e${On_Red}Could not mount the crypt disk at  \"${MOUNTPATH}\". Unable to proceed.\e${Color_Off}"
   cleanup
 fi
 
 if [ "$mountpath_owner" != "root" ]; then
-  echo "Setting mountpoint permissions.."
+  echo -e "\e${BIWhite}Setting the mountpoint permissions...\e${Color_Off}"
   executable="chmod 770 ${MOUNTPATH}"
   echo -e "${executing}$elevated: $executable"
   sudoit $executable
-  executable="mount | grep cryptopool-mycryptdisk"
+  executable="chown -R ${mountpath_owner} ${MOUNTPATH}"
   echo -e "${executing}$elevated: $executable"
   sudoit $executable
 fi
@@ -766,14 +795,15 @@ echo
 
 read -p "Press any key to continue... " -n1 -s
 
-dialog --title "Remove map/loop devices" --yesno "\nRemove the created map and loop devices?" 10 50
+dialog --title "Lock/unmount the new cryptodisk?" --yesno "\nDo you want to leave the newly created cryptodisk mounted and unlocked at \"${MOUNTPATH}\"?\n\n
+You can unmount/lock and remount/unlock the cryptodisk at any time using the \"mount-crypto\" and \"umount-crypto\" scripts that have been created in the same directory with this \"create-crypto\" script." 18 55
 ret=$?
   
 case $ret in
   0)
-    cleanup;;
+    clear && echo && echo "Leaving the cryptodisk open at ${MOUNTPATH}" && echo;;
   1)
-    ;;
+    clear && echo && echo "Closing the cryptodisk." && cleanup;;
 esac
 
 #-- dev
@@ -794,7 +824,7 @@ esac
 
 # CREATE ONLY: ✔
 # zfs:
-# sudo zpool create -o ashift=12 -O atime=off -O compression=lz4 -O normalization=formD -O mountpoint=/ -m ${MOUNTPATH} cryptopool-${CRYPTOVAULTLABEL} ${VAULTPATH}/${CRYPTOVAULTLABEL}
+# sudo zpool create -o ashift=12 -O atime=off -O compression=lz4 -O normalization=formD -O mountpoint=/ -m ${MOUNTPATH} zpool-${CRYPTOVAULTLABEL} ${VAULTPATH}/${CRYPTOVAULTLABEL}
 # ext4:
 # sudo mkfs.ext4 /dev/mapper/${CRYPTOVAULTLABEL}
 
@@ -820,4 +850,4 @@ esac
 
 # DNAM=${CRYPTOVAULTLABEL}; LDEV=`sudo losetup --raw | grep $DNAM | awk '{print $1}'`; sudo losetup -d $LDEV
 
-#TODO: create mount/umount scripts
+#TODO: create the mount(unlock) / umount(lock) scripts
