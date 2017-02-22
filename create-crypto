@@ -619,8 +619,6 @@ else
   elevated=''
 fi
 
-#TODO: Check on each step that the previous one has completed successfully
-
 # create vault path
 if [ "$vaultpath_exists" = "false" ]; then
   echo -e "\e${BIWhite}Creating vault path...\e${Color_Off}"
@@ -631,6 +629,11 @@ if [ "$vaultpath_exists" = "false" ]; then
   else
     echo -e "${executing}$elevated (as $vaultpath_owner): $executable"
     sudoitas $vaultpath_owner $executable
+  fi
+  
+  if [ ! -d "$VAULTPATH" ]; then
+    echo -e "\e${BWhite}\e${On_Red}Could not create vault path \"${VAULTPATH}\". Unable to proceed.\e${Color_Off}"
+    cleanup
   fi
 fi
 
@@ -651,6 +654,10 @@ else
   echo -e "${executing}$elevated (as $vaultpath_owner): $executable"
   sudoitas $vaultpath_owner $executable
 fi
+if [ ! -f "${VAULTPATH}/${CRYPTOVAULTLABEL}" ]; then
+  echo -e "\e${BWhite}\e${On_Red}Could not create vault container file \"${VAULTPATH}/${CRYPTOVAULTLABEL}\". Unable to proceed.\e${Color_Off}"
+  cleanup
+fi
 
 echo
 
@@ -665,27 +672,26 @@ if [ "$mountpoint_exists" = "false" ]; then
     echo -e "${executing}$elevated (as $mountpath_owner): $executable"
     sudoitas $mountpath_owner $executable
   fi
+  if [ ! -d "$MOUNTPATH" ]; then
+    echo -e "\e${BWhite}\e${On_Red}Could not create mountpoint path \"${MOUNTPATH}\". Unable to proceed.\e${Color_Off}"
+    cleanup
+  fi
 fi
 
 echo
 
 # format the container
-if [ -f ${VAULTPATH}/${CRYPTOVAULTLABEL} ]; then
-  echo -e "\e${BIWhite}Formatting the container with encrypted LUKS filesystem...\e${Color_Off}"
-  echo -e "${executing}$elevated: cryptsetup luksFormat -q ${VAULTPATH}/${CRYPTOVAULTLABEL}"
+echo -e "\e${BIWhite}Formatting the container with encrypted LUKS filesystem...\e${Color_Off}"
+echo -e "${executing}$elevated: cryptsetup luksFormat -q ${VAULTPATH}/${CRYPTOVAULTLABEL}"
 
-  if [ "$im_root" -eq 0 ] ; then
-    if ! sudo -n true 2>/dev/null; then 
-      echo -e "\e${IYellow}This operation requires you to re-enter your sudo password below:\e${Color_Off}"
-    fi
-    echo -n "$CRYPTPWD" | sudo cryptsetup luksFormat -q ${VAULTPATH}/${CRYPTOVAULTLABEL} -
-  else
-    # running as root, no sudo needed (even when creting for a different user, this is only access to cryptsetup command)
-    echo -n "$CRYPTPWD" | cryptsetup luksFormat -q ${VAULTPATH}/${CRYPTOVAULTLABEL} -
+if [ "$im_root" -eq 0 ] ; then
+  if ! sudo -n true 2>/dev/null; then 
+    echo -e "\e${IYellow}This operation requires you to re-enter your sudo password below:\e${Color_Off}"
   fi
+  echo -n "$CRYPTPWD" | sudo cryptsetup luksFormat -q ${VAULTPATH}/${CRYPTOVAULTLABEL} -
 else
-  echo -e "\e${BWhite}\e${On_Red}Vault file was not created. Unable to proceed.\e${Color_Off}"
-  exit 1
+  # running as root, no sudo needed (even when creting for a different user, this is only access to cryptsetup command)
+  echo -n "$CRYPTPWD" | cryptsetup luksFormat -q ${VAULTPATH}/${CRYPTOVAULTLABEL} -
 fi
 
 echo
@@ -700,6 +706,7 @@ echo "Using loop device: $loopdev"
 executable="losetup $loopdev ${VAULTPATH}/${CRYPTOVAULTLABEL}"
 echo -e "${executing}$elevated: $executable"
 sudoit $executable
+# to confirm, pull label with $loopdev, compare to the label
 
 echo
 
@@ -731,10 +738,22 @@ else
   echo -e "${executing}$elevated: $executable_mount"
   sudoit $executable_mount
 fi
+
+# test mount
+mounttest=`mount | grep --color=never $cryptopool`
+if [ "${mounttest}" = "" ]; then
+  echo -e "\e${BWhite}\e${On_Red}Could not mount the crypt disk at  \"${MOUNTPATH}\". Unable to proceed.\e${Color_Off}"
+  cleanup
+fi
+
 if [ "$mountpath_owner" != "root" ]; then
   echo "Setting mountpoint permissions.."
-  sudoit chmod 770 ${MOUNTPATH}
-  sudoit chown -R ${mountpath_owner} ${MOUNTPATH}
+  executable="chmod 770 ${MOUNTPATH}"
+  echo -e "${executing}$elevated: $executable"
+  sudoit $executable
+  executable="mount | grep cryptopool-mycryptdisk"
+  echo -e "${executing}$elevated: $executable"
+  sudoit $executable
 fi
 
 echo 
@@ -747,7 +766,7 @@ echo
 
 read -p "Press any key to continue... " -n1 -s
 
-dialog --title "Remove map/loop devices" --yesno "\nRemove created map and loop devices?" 10 50
+dialog --title "Remove map/loop devices" --yesno "\nRemove the created map and loop devices?" 10 50
 ret=$?
   
 case $ret in
