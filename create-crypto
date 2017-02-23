@@ -202,6 +202,7 @@ cleanup()
   dismounted="false"
   if [ "$CRYPTOFS" = "zfs" ]; then
 
+    #export zfs
     while [ "$dismounted" = "false" ]; do
       sudoit zpool export $zpool_id
       if [ $? -ne 0 ]; then
@@ -218,7 +219,8 @@ cleanup()
     echo "zfs pool exported."
 
   else
-
+  
+    # unmount ext4
     while [ "$dismounted" = "false" ]; do
       sudoit umount ${MOUNTPATH}
       if [ $? -ne 0 ]; then
@@ -467,52 +469,61 @@ NOTE: Since vaults are mapped through /dev/mapper system-wide (even when access 
 
   CRYPTOVAULTLABEL=$(echo "${CRYPTOVAULTLABELINPUT// /}")
 
-  vaultname_conflict=false
-  mapper_conflict=false
-  for i in /dev/mapper/*; do
-    thisbase=$(basename $i)
-    if [ "$thisbase" = "$CRYPTOVAULTLABEL" ]; then
-      vaultname_conflict=true
-      mapper_conflict=true
-    fi
-  done
+  if [ "$CRYPTOVAULTLABEL" = "" ] ||
+     [[ $CRYPTOVAULTLABEL =~ ^[_.=-]*$ ]]; then
 
-  for i in $VAULTPATH/*; do
-    thisbase=$(basename $i)
-    if [ "$thisbase" = "$CRYPTOVAULTLABEL" ]; then
-      vaultname_conflict=true
-    fi
-  done
-
-  if [ "$vaultname_conflict" = "true" ]; then
-    if [ "$mapper_conflict" = "true" ]; then
-       vaultname_conflict_message="\nThe crypto vault label you have chosen ($CRYPTOVAULTLABEL) conflicts with an already mapped vault.\n\nPlease choose another label/filename!"
-    else
-       vaultname_conflict_message="\nThe crypto vault label you have chosen ($CRYPTOVAULTLABEL) conflicts with an existing vault file at your chosen vault file path ($VAULTPATH).\n\nPlease choose another label/filename!"
-    fi    
-
-    dialog --title "ERROR" --msgbox "$vaultname_conflict_message" 14 50
-    ret=$?
-  
-    case $ret in
-      0)
-        ;;
-      1)
-        exit 1;;
-    esac
+    dialog --title "ERROR" --msgbox "Vault file name cannot be empty or contain only hyphens/underscores/spaces. Please select a valid name." 14 50
 
   else
-    VAULTFQFN=${VAULTPATH}/${CRYPTOVAULTLABEL}
-    dialog --title "Confirm selected label/filename" --yesno "\nYou selected vault label / file name:\n\n${CRYPTOVAULTLABEL}\n\nThe full vault file path will be:\n\n${VAULTFQFN}\n\nIs this what you want?" 16 70
-    ret=$?
-  
-    case $ret in
-      0)
-        break;;
-      1)
-        ;;
-    esac
 
+    vaultname_conflict=false
+    mapper_conflict=false
+    for i in /dev/mapper/*; do
+      thisbase=$(basename $i)
+      if [ "$thisbase" = "$CRYPTOVAULTLABEL" ]; then
+        vaultname_conflict=true
+        mapper_conflict=true
+      fi
+    done
+
+    for i in $VAULTPATH/*; do
+      thisbase=$(basename $i)
+      if [ "$thisbase" = "$CRYPTOVAULTLABEL" ]; then
+        vaultname_conflict=true
+      fi
+    done
+
+    if [ "$vaultname_conflict" = "true" ]; then
+      if [ "$mapper_conflict" = "true" ]; then
+         vaultname_conflict_message="\nThe crypto vault label you have chosen ($CRYPTOVAULTLABEL) conflicts with an already mapped vault.\n\nPlease choose another label/filename!"
+      else
+         vaultname_conflict_message="\nThe crypto vault label you have chosen ($CRYPTOVAULTLABEL) conflicts with an existing vault file at your chosen vault file path ($VAULTPATH).\n\nPlease choose another label/filename!"
+      fi    
+
+      dialog --title "ERROR" --msgbox "$vaultname_conflict_message" 14 50
+      ret=$?
+  
+      case $ret in
+        0)
+          ;;
+        1)
+          exit 1;;
+      esac
+
+    else
+      VAULTFQFN=${VAULTPATH}/${CRYPTOVAULTLABEL}
+      dialog --title "Confirm selected label/filename" --yesno "\nYou selected vault label / file name:\n\n${CRYPTOVAULTLABEL}\n\nThe full vault file path will be:\n\n${VAULTFQFN}\n\nIs this what you want?" 16 70
+      ret=$?
+  
+      case $ret in
+        0)
+          break;;
+        1)
+          ;;
+      esac
+
+    fi
+    
   fi
 
 done
@@ -776,6 +787,7 @@ if [ "${mounttest}" = "" ]; then
 fi
 
 if [ "$mountpath_owner" != "root" ]; then
+  echo
   echo -e "\e${BIWhite}Setting the mountpoint permissions...\e${Color_Off}"
   executable="chmod 770 ${MOUNTPATH}"
   echo -e "${executing}$elevated: $executable"
@@ -796,7 +808,7 @@ echo
 read -p "Press any key to continue... " -n1 -s
 
 dialog --title "Lock/unmount the new cryptodisk?" --yesno "\nDo you want to leave the newly created cryptodisk mounted and unlocked at \"${MOUNTPATH}\"?\n\n
-You can unmount/lock and remount/unlock the cryptodisk at any time using the \"mount-crypto\" and \"umount-crypto\" scripts that have been created in the same directory with this \"create-crypto\" script." 18 55
+You can unmount/lock and remount/unlock the cryptodisk at any time using the \"mount-crypto\" and \"umount-crypto\" scripts that have been created in the same directory with this \"create-crypto\" script." 20 70
 ret=$?
   
 case $ret in
