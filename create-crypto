@@ -77,7 +77,7 @@ On_ICyan='\033[0;106m'    # Cyan
 On_IWhite='\033[0;107m'   # White
 
 # get the "home" of this script, no matter where this is executed from
-SCRIPTDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+SCRIPTDIR=`dirname "$(readlink -f "$0")"`
 
 # reset sudo cache timer if set previously
 sudo -k
