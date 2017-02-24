@@ -1,9 +1,3 @@
-#!/bin/bash
- 
-CRYPT_MOUNTPOINT=/mnt/crypto
-CRYPT_DISK_FQFN=/root/crypto/cryptdisk
-CRYPT_LABEL=crypt-disk
-LOOPBACK_DEVICE=`losetup -f`
 
 # ----------------------------------------------------------------------------
  
