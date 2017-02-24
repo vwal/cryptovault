@@ -76,8 +76,10 @@ On_IPurple='\033[0;105m'  # Purple
 On_ICyan='\033[0;106m'    # Cyan
 On_IWhite='\033[0;107m'   # White
 
+# get the "home" of this script, no matter where this is executed from
+SCRIPTDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
-#reset sudo cache timer if set previously
+# reset sudo cache timer if set previously
 sudo -k
 is_sudo=0
 SUDOPWD=
@@ -790,10 +792,39 @@ fi
 
 echo 
 
+
+# MAIN LOGIC: CREATE THE UTILITY SCRIPTS =====================================
+
+#TODO: check that dir/file exists
+cp ${SCRIPTDIR}/_stubs/mount-crypto ${SCRIPTDIR}/mount-${CRYPTOVAULTLABEL}
+cp ${SCRIPTDIR}/_stubs/umount-crypto ${SCRIPTDIR}/umount-${CRYPTOVAULTLABEL}
+cp ${SCRIPTDIR}/_stubs/util-crypto ${SCRIPTDIR}/util-${CRYPTOVAULTLABEL}
+
+echo -e "#!/bin/bash\n
+CRYPTO_MOUNTPOINT=${MOUNTPATH}
+CRYPTO_VAULTFILE=${VAULTPATH}/${CRYPTOVAULTLABEL}
+CRYPTO_LABEL=${CRYPTOVAULTLABEL}
+ZPOOL_ID=${zpool_id}\n$(cat ${SCRIPTDIR}/mount-${CRYPTOVAULTLABEL})" > ${SCRIPTDIR}/mount-${CRYPTOVAULTLABEL}
+
+echo -e "#!/bin/bash\n
+CRYPTO_MOUNTPOINT=${MOUNTPATH}
+CRYPTO_VAULTFILE=${VAULTPATH}/${CRYPTOVAULTLABEL}
+CRYPTO_LABEL=${CRYPTOVAULTLABEL}
+ZPOOL_ID=${zpool_id}\n$(cat ${SCRIPTDIR}/umount-${CRYPTOVAULTLABEL})" > ${SCRIPTDIR}/umount-${CRYPTOVAULTLABEL}
+
+echo -e "#!/bin/bash\n
+CRYPTO_MOUNTPOINT=${MOUNTPATH}
+CRYPTO_VAULTFILE=${VAULTPATH}/${CRYPTOVAULTLABEL}
+CRYPTO_LABEL=${CRYPTOVAULTLABEL}
+ZPOOL_ID=${zpool_id}\n$(cat ${SCRIPTDIR}/util-${CRYPTOVAULTLABEL})" > ${SCRIPTDIR}/util-${CRYPTOVAULTLABEL}
+
+
+# MAIN LOGIC: PROCESS COMPLETED; WRAPPING UP =================================
+
 read -p "Cryptodisk has been created; press any key to continue... " -n1 -s
 
 dialog --title "Lock/unmount the new cryptodisk?" --yesno "\nDo you want to leave the newly created cryptodisk mounted and unlocked at \"${MOUNTPATH}\"?\n\n
-You can unmount/lock and remount/unlock the cryptodisk at any time using the \"mount-crypto\" and \"umount-crypto\" scripts that have been created in the same directory with this \"create-crypto\" script." 20 70
+You can unmount/lock and remount/unlock the cryptodisk at any time using the \"mount-${CRYPTOVAULTLABEL}\" and \"umount-${CRYPTOVAULTLABEL}\" scripts that have been created in the same directory with this \"create-crypto\" script." 20 70
 ret=$?
   
 case $ret in
