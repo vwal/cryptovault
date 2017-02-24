@@ -1,0 +1,31 @@
+#!/bin/bash
+ 
+CRYPT_MOUNTPOINT=/mnt/crypto
+CRYPT_DISK=/root/crypto/cryptdisk
+CRYPT_LABEL=crypt-disk
+
+# ----------------------------------------------------------------------------
+ 
+LOOPBACK_DEVICE=`losetup -j ${CRYPT_DISK} | awk '{print $1}' | sed '$s/.$//'`
+ 
+CAN_RELEASE=true
+if grep -qsE "^[^ ]+ ${CRYPT_MOUNTPOINT}" /proc/mounts; then
+  umount ${CRYPT_MOUNTPOINT} > /dev/null 2>&1
+  
+  if [ $? -ne 0 ]; then
+    echo "WARNING - Could not unmount ${CRYPT_MOUNTPOINT}! Device busy."
+    CAN_RELEASE=false
+  else
+    echo "Crypto-disk was unmounted."
+  fi  
+else 
+  echo "Crypto-disk was not mounted."
+fi
+ 
+if $CAN_RELEASE; then
+  if [ -b /dev/mapper/${CRYPT_LABEL} ]; then
+    cryptsetup luksClose /dev/mapper/${CRYPT_LABEL} > /dev/null 2>&1
+  fi
+ 
+  losetup -d ${LOOPBACK_DEVICE} > /dev/null 2>&1
+fi

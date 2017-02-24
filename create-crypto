@@ -790,10 +790,6 @@ fi
 
 echo 
 
-echo "Complete."
-
-echo
-
 read -p "Cryptodisk has been created; press any key to continue... " -n1 -s
 
 dialog --title "Lock/unmount the new cryptodisk?" --yesno "\nDo you want to leave the newly created cryptodisk mounted and unlocked at \"${MOUNTPATH}\"?\n\n

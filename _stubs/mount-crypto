@@ -1,0 +1,66 @@
+#!/bin/bash
+ 
+CRYPT_MOUNTPOINT=/mnt/crypto
+CRYPT_DISK_FQFN=/root/crypto/cryptdisk
+CRYPT_LABEL=crypt-disk
+LOOPBACK_DEVICE=`losetup -f`
+
+# ----------------------------------------------------------------------------
+ 
+if [ ! -f ${CRYPT_DISK_FQFN} ]; then
+  echo "Crypt disk '${CRYPT_DISK_FQFN}' missing. Cannot continue."
+  exit 1
+fi
+ 
+if [ ! -d ${CRYPT_MOUNTPOINT} ]; then
+  echo "Mountpoint '${CRYPT_MOUNTPOINT}' missing. Cannot continue."
+  exit 1
+fi
+ 
+function check_mounted {
+  if grep -qsE "^[^ ]+ $1" /proc/mounts; then
+    _RET=true
+  else
+    _RET=false
+  fi
+}
+ 
+check_mounted $CRYPT_MOUNTPOINT
+if ${_RET} ; then
+  echo "Mountpoint '${CRYPT_MOUNTPOINT}' already mounted. Cannot continue."
+  exit 1
+fi
+ 
+losetup ${LOOPBACK_DEVICE} ${CRYPT_DISK_FQFN} > /dev/null 2>&1
+ 
+# Capture errors
+if [ $? -ne 0 ]; then
+  echo "ERROR - Loopback device in use."
+  exit 1
+else
+  echo "OK - Loopback device mapped."
+fi
+ 
+cryptsetup luksOpen ${LOOPBACK_DEVICE} ${CRYPT_LABEL} > /dev/null 2>&1
+ 
+# Capture errors
+if [ $? -ne 0 ]; then
+  echo "ERROR Opening LUKS CryptoFS. Removing the loopback device."
+  losetup -d ${LOOPBACK_DEVICE}
+  exit 1
+else
+  echo "OK - LUKS CryptoFS Opened."
+fi
+ 
+mount /dev/mapper/${CRYPT_LABEL} ${CRYPT_MOUNTPOINT} > /dev/null 2>&1
+ 
+# Capture errors
+if [ $? -ne 0 ]; then
+  echo "ERROR mounting CryptoFS."
+  cryptsetup luksClose /dev/mapper/${CRYPT_LABEL}
+  losetup -d ${LOOPBACK_DEVICE}
+  exit 1
+else
+  echo "OK - Mounted CryptoFS."
+  exit 0
+fi
