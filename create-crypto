@@ -634,20 +634,6 @@ esac
 
 clear 
 
-#-- dev
-echo "Crypto FS: $CRYPTOFS"
-echo "Crypto PWD: $CRYPTPWD"
-echo "Crypto vault size: $VAULTSIZEVAL"
-echo "Crypto vault size unit: $VAULTSIZEUNIT"
-echo "Crypto vault label/filename: $CRYPTOVAULTLABEL"
-echo "Crypto vault file location: $VAULTPATH"
-echo "Crypto vault file location ownership: $vaultpath_owner"
-echo "Crypto vault mountpath: $MOUNTPATH"
-echo "Crypto vault mountpath ownership: $mountpath_owner"
-echo
-echo --
-#-- dev
-
 echo
 
 trap cleanup INT ERR
@@ -670,7 +656,8 @@ if [ "$vaultpath_exists" = "false" ]; then
     echo -e "${executing}$elevated (as $vaultpath_owner): $executable"
     sudoitas $vaultpath_owner $executable
   fi
-  
+ 
+  # test 
   if [ ! -d "$VAULTPATH" ]; then
     echo -e "\e${BWhite}\e${On_Red}Could not create vault path \"${VAULTPATH}\". Unable to proceed.\e${Color_Off}"
     cleanup
@@ -694,6 +681,8 @@ else
   echo -e "${executing}$elevated (as $vaultpath_owner): $executable"
   sudoitas $vaultpath_owner $executable
 fi
+
+# test
 if [ ! -f "${VAULTPATH}/${CRYPTOVAULTLABEL}" ]; then
   echo -e "\e${BWhite}\e${On_Red}Could not create vault container file \"${VAULTPATH}/${CRYPTOVAULTLABEL}\". Unable to proceed.\e${Color_Off}"
   cleanup
@@ -712,6 +701,8 @@ if [ "$mountpoint_exists" = "false" ]; then
     echo -e "${executing}$elevated (as $mountpath_owner): $executable"
     sudoitas $mountpath_owner $executable
   fi
+  
+  #test
   if [ ! -d "$MOUNTPATH" ]; then
     echo -e "\e${BWhite}\e${On_Red}Could not create mountpoint path \"${MOUNTPATH}\". Unable to proceed.\e${Color_Off}"
     cleanup
@@ -746,7 +737,7 @@ echo "Using loop device: $loopdev"
 executable="losetup $loopdev ${VAULTPATH}/${CRYPTOVAULTLABEL}"
 echo -e "${executing}$elevated: $executable"
 sudoit $executable
-# to confirm, pull label with $loopdev, compare to the label
+# to confirm/test, pull label with $loopdev, compare to the label
 
 echo
 
@@ -779,7 +770,7 @@ else
   sudoit $executable_mount
 fi
 
-# test mount
+# test the mount
 mounttest=`mount | grep --color=never "$zpool_id"`
 if [ "${mounttest}" = "" ]; then
   echo -e "\e${BWhite}\e${On_Red}Could not mount the crypt disk at  \"${MOUNTPATH}\". Unable to proceed.\e${Color_Off}"
@@ -803,9 +794,7 @@ echo "Complete."
 
 echo
 
-#-- dev
-
-read -p "Press any key to continue... " -n1 -s
+read -p "Cryptodisk has been created; press any key to continue... " -n1 -s
 
 dialog --title "Lock/unmount the new cryptodisk?" --yesno "\nDo you want to leave the newly created cryptodisk mounted and unlocked at \"${MOUNTPATH}\"?\n\n
 You can unmount/lock and remount/unlock the cryptodisk at any time using the \"mount-crypto\" and \"umount-crypto\" scripts that have been created in the same directory with this \"create-crypto\" script." 20 70
@@ -817,8 +806,6 @@ case $ret in
   1)
     clear && echo && echo "Closing the cryptodisk." && cleanup;;
 esac
-
-#-- dev
 
 
 
