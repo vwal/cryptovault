@@ -1,5 +1,81 @@
+#!/bin/bash 
+#DEV: the above line must be removed
 
 # ----------------------------------------------------------------------------
+
+# REOPEN:
+
+# sudo zpool import pool-${CRYPTOVAULTLABEL}
+# sudo zpool scrub pool-${CRYPTOVAULTLABEL}
+# -or-
+# sudo mount /dev/mapper/${CRYPTOVAULTLABEL} ${MOUNTPATH}
+
+# set up the loop device
+echo -e "\e${BIWhite}Setting up the loop device...\e${Color_Off}"
+if ! sudo -n true 2>/dev/null; then 
+  echo -e "\e${IYellow}This operation requires you to re-enter your sudo password below:\e${Color_Off}"
+fi
+loopdev=`sudo losetup -f`
+echo "Using loop device: $loopdev"
+executable="losetup $loopdev ${VAULTPATH}/${CRYPTOVAULTLABEL}"
+echo -e "${executing}$elevated: $executable"
+sudoit $executable
+# to confirm/test, pull label with $loopdev, compare to the label
+
+echo
+
+# open the mapped loop device (req. selected encryption password)
+echo -e "\e${BIWhite}Opening the mapped device...\e${Color_Off}"
+executable="cryptsetup luksOpen $loopdev ${CRYPTOVAULTLABEL}"
+echo -e "${executing}$elevated: $executable"
+echo -e "\e${IYellow}The encrypted device is being opened. Please enter below the encryption password\nyou selected earlier in the process (NOTE: typed characters will not echo).\e${Color_Off}"
+sudoit $executable
+
+echo
+
+# mounting the filesystem
+echo -e "\e${BIWhite}Mounting the ${CRYPTOFS} filesystem...\e${Color_Off}"
+if [ "$CRYPTOFS" = "zfs" ]; then
+  zpool_id="zpool-${CRYPTOVAULTLABEL}"
+  echo "zpool ID for this cryptodisk is: $zpool_id"
+  executable="zpool import $zpool_id"
+  echo -e "${executing}$elevated: $executable"  
+  sudoit $executable
+  echo "Currently mounted zfs filesystems:"
+  sudoit zfs list
+  echo -e "\e${BIWhite}Scrubbing the mounted filesystem (integrity check)...\e${Color_Off}"
+  executable="zpool scrub $zpool_id"
+  sudoit $executable  
+else
+  executable="mkfs.ext4 /dev/mapper/${CRYPTOVAULTLABEL}"
+  echo -e "${executing}$elevated: $executable"
+  sudoit $executable
+  executable_mount="mount /dev/mapper/${CRYPTOVAULTLABEL} ${MOUNTPATH}"
+  echo "Mounting ext4 filesystem..."
+  echo -e "${executing}$elevated: $executable_mount"
+  sudoit $executable_mount
+fi
+
+# test the mount
+mounttest=`mount | grep --color=never "$zpool_id"`
+if [ "${mounttest}" = "" ]; then
+  echo -e "\e${BWhite}\e${On_Red}Could not mount the crypt disk at  \"${MOUNTPATH}\". Unable to proceed.\e${Color_Off}"
+  cleanup
+fi
+
+if [ "$mountpath_owner" != "root" ]; then
+  echo
+  echo -e "\e${BIWhite}Setting the mountpoint permissions...\e${Color_Off}"
+  executable="chmod 770 ${MOUNTPATH}"
+  echo -e "${executing}$elevated: $executable"
+  sudoit $executable
+  executable="chown -R ${mountpath_owner} ${MOUNTPATH}"
+  echo -e "${executing}$elevated: $executable"
+  sudoit $executable
+fi
+
+
+### LEGACY BEGIN -------------------------------
  
 if [ ! -f ${CRYPT_DISK_FQFN} ]; then
   echo "Crypt disk '${CRYPT_DISK_FQFN}' missing. Cannot continue."

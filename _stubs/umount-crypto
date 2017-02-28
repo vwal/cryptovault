@@ -1,6 +1,88 @@
+#!/bin/bash 
+#DEV: the above line must be removed
 
 # ----------------------------------------------------------------------------
- 
+
+# CLOSE:
+
+# zfs:
+# sudo zpool export pool-${CRYPTOVAULTLABEL}
+# ext4:
+# umount ${MOUNTPATH} > /dev/null 2>&1
+
+#TODO: Add here a list of processes that hold the lock
+
+# sudo cryptsetup luksClose /dev/mapper/${CRYPTOVAULTLABEL}
+
+# DNAM=${CRYPTOVAULTLABEL}; LDEV=`sudo losetup --raw | grep $DNAM | awk '{print $1}'`; sudo losetup -d $LDEV
+
+  # export zfs pool, umount ext4 fs
+  dismounted="false"
+  if [ "$CRYPTOFS" = "zfs" ]; then
+
+    #export zfs
+    while [ "$dismounted" = "false" ]; do
+      sudoit zpool export $zpool_id
+      if [ $? -ne 0 ]; then
+        echo "Unable to unmount the disk; device is busy. Free the device and try again."
+        echo "The following process(es) hold the mount:"
+        x=(); for a in $(mount | cut -d' ' -f3); do test -e "$a" || x+=("-e$a"); done
+        lsof "${x[@]}" -f -- ${MOUNTPATH}
+        echo
+        read -p "Press any key to retry unmount! " -n1 -s
+      else
+        dismounted="true"
+      fi
+    done
+    echo "zfs pool exported."
+
+  else
+  
+    # unmount ext4
+    while [ "$dismounted" = "false" ]; do
+      sudoit umount ${MOUNTPATH}
+      if [ $? -ne 0 ]; then
+          echo "Unable to unmount the disk; device is busy. Free the device and try again."
+          echo "The following process(es) hold the mount:"
+          x=(); for a in $(mount | cut -d' ' -f3); do test -e "$a" || x+=("-e$a"); done
+          lsof "${x[@]}" -f -- ${MOUNTPATH}
+          echo
+          read -p "Press any key to retry unmount! " -n1 -s
+      else
+        dismounted="true"
+      fi
+    done
+    echo "ext4 filesystem unmounted at ${MOUNTPATH}."
+    
+  fi  
+
+  # remove mapped disk
+  if [ -b /dev/mapper/${CRYPTOVAULTLABEL} ]; then
+    sudoit cryptsetup luksClose /dev/mapper/${CRYPTOVAULTLABEL}
+    echo "Mapped device /dev/mapper/${CRYPTOVAULTLABEL} removed."
+  fi
+
+  if ! sudo -n true 2>/dev/null; then 
+    echo -e "\e${IYellow}This operation requires you to re-enter your sudo password below:\e${Color_Off}"
+  fi 
+  # acquire loop device
+  loopdev2del=`sudo losetup --raw | grep ${VAULTPATH}/${CRYPTOVAULTLABEL} | awk '{print $1}'`
+  # delete loop device
+  if [ "$loopdev2del" != "" ]; then
+    sudoit losetup -d $loopdev2del > /dev/null 2>&1
+    echo "Loop device $loopdev2del removed."
+  fi
+  echo "Exiting.."
+  echo
+  exit 1
+
+
+
+
+
+
+### ---------- LEGACY BEGIN
+
 LOOPBACK_DEVICE=`losetup -j ${CRYPT_DISK} | awk '{print $1}' | sed '$s/.$//'`
  
 CAN_RELEASE=true

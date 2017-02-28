@@ -739,7 +739,10 @@ echo "Using loop device: $loopdev"
 executable="losetup $loopdev ${VAULTPATH}/${CRYPTOVAULTLABEL}"
 echo -e "${executing}$elevated: $executable"
 sudoit $executable
-# to confirm/test, pull label with $loopdev, compare to the label
+
+DNAM=${CRYPTOVAULTLABEL}; LDEV=`sudo losetup --raw | grep $DNAM | awk '{print $1}'`;
+
+#TODO: to confirm/test, pull label with $loopdev, compare to the label
 
 echo
 
@@ -795,7 +798,13 @@ echo
 
 # MAIN LOGIC: CREATE THE UTILITY SCRIPTS =====================================
 
-#TODO: check that dir/file exists
+if [ ! -d ${SCRIPTDIR}/_stubs ] ||
+   [ ! -f ${SCRIPTDIR}/_stubs/mount-crypto ] ||
+   [ ! -f ${SCRIPTDIR}/_stubs/umount-crypto ] ||
+   [ ! -f ${SCRIPTDIR}/_stubs/util-crypto ]; then
+  echo "The utility script stubs in \"_stubs\" subdirectory are missing. Unable to proceed. Please make sure that you have not altered the cloned \"cryptovault\" repository, and try again!"
+  cleanup 
+fi
 cp ${SCRIPTDIR}/_stubs/mount-crypto ${SCRIPTDIR}/mount-${CRYPTOVAULTLABEL}
 cp ${SCRIPTDIR}/_stubs/umount-crypto ${SCRIPTDIR}/umount-${CRYPTOVAULTLABEL}
 cp ${SCRIPTDIR}/_stubs/util-crypto ${SCRIPTDIR}/util-${CRYPTOVAULTLABEL}

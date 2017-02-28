@@ -1,8 +1,4 @@
-#!/bin/bash
- 
-CRYPT_MOUNTPOINT=/mnt/crypto
-CRYPT_DISK=/root/crypto/cryptdisk
-CRYPT_LABEL=crypt-disk
+#!/bin/bash 
+#DEV: the above line must be removed
 
 # ----------------------------------------------------------------------------
- 
