@@ -505,7 +505,7 @@ done
 # VAULT LABEL/FILE NAME
 while true; do
   CRYPTOVAULT_LABEL_INPUT=$(dialog --title "Crypto Vault Label/File Name" --inputbox "\nEnter the desired crypto vault label (no spaces). It will also be used as the crypto vault file name.\n\n
-NOTE: Since the crypto vaults are mapped through /dev/mapper system-wide (even when access is limited to a specific user), the label must be unique on the system.\n" 14 55 2>&1 > /dev/tty)
+NOTE: Since the crypto vaults are mapped through /dev/mapper system-wide (even when access is limited to a specific user), the label must be unique on the system.\n" 15 55 2>&1 > /dev/tty)
   ret=$?
 
   # ok (proceed) / cancel
@@ -856,7 +856,7 @@ if [ ! -d ${SCRIPT_DIR}/_stubs ] ||
 fi
 
 #TODO: Should these utility scripts perhaps be copied to the homedir of the user who owns the mountpoint ($mountpath_owner)?
-#      mountpath_owner_home=`sudo su - $mountpath_owner -c 'echo ~'`
+#      mountpath_owner_home=$( getent passwd ${mountpath_owner} | cut -d: -f6 )
 #      Or perhaps inquire the user where they want these placed (and made executable to)?
 
 #TODO: with `cat` the vars get evaluated.. must either cat as-is, or find a different way
@@ -874,7 +874,7 @@ CRYPTOVAULT_FS=${CRYPTOVAULT_FS}
 CRYPTOVAULT_FQFN=${VAULTFILE_FQFN}
 CRYPTOVAULT_MOUNTPOINT=${MOUNTPOINT}
 CRYPTOVAULT_LABEL=${CRYPTOVAULT_LABEL}
-ZPOOL_ID=${zpool_id}\n$(cat ${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL})" > ${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}
+ZPOOL_ID=${zpool_id}\n" | cat - "${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}" | sponge "${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}"
 
 else
 
@@ -882,7 +882,7 @@ else
 CRYPTOVAULT_FS=${CRYPTOVAULT_FS}
 CRYPTOVAULT_FQFN=${VAULTFILE_FQFN}
 CRYPTOVAULT_MOUNTPOINT=${MOUNTPOINT}
-CRYPTOVAULT_LABEL=${CRYPTOVAULT_LABEL}\n$(cat ${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL})" > ${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}
+CRYPTOVAULT_LABEL=${CRYPTOVAULT_LABEL}\n" | cat - "${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}" | sponge "${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}"
 
 fi
 
@@ -890,14 +890,14 @@ echo -e "#!/bin/bash\n
 CRYPTO_FQFN=${VAULTFILE_FQFN}
 CRYPTO_MOUNTPOINT=${MOUNTPOINT}
 CRYPTO_LABEL=${CRYPTOVAULT_LABEL}
-ZPOOL_ID=${zpool_id}\n$(cat ${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL})" > ${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL}
+ZPOOL_ID=${zpool_id}\n" | cat - "${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL}" | sponge "${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL}"
 
 echo -e "#!/bin/bash\n
 CRYPTOVAULT_FS=${CRYPTOVAULT_FS}
 CRYPTO_FQFN=${VAULTFILE_FQFN}
 CRYPTO_MOUNTPOINT=${MOUNTPOINT}
 CRYPTO_LABEL=${CRYPTOVAULT_LABEL}
-ZPOOL_ID=${zpool_id}\n$(cat ${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL})" > ${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL}
+ZPOOL_ID=${zpool_id}\n" | cat - "${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL}" | sponge "${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL}"
 
 #TODO: set ownership & make executable for the commanddir & the commands (above)
 
