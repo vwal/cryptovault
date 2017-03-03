@@ -1,8 +1,8 @@
 #!/bin/bash
 
-#set -x
 
-# color defs
+# COLOR DEFINITIONS ==========================================================
+
 # Reset
 Color_Off='\033[0m'       # Text Reset
 
@@ -76,17 +76,26 @@ On_IPurple='\033[0;105m'  # Purple
 On_ICyan='\033[0;106m'    # Cyan
 On_IWhite='\033[0;107m'   # White
 
-# get the "home" of this script, no matter where this is executed from
-SCRIPTDIR=`dirname "$(readlink -f "$0")"`
 
-# reset sudo cache timer if set previously
+# DEFAULTS & CONSTANTS =======================================================
+
+# get the "home" of this script, no matter where this is executed from
+SCRIPT_DIR=`dirname "$(readlink -f "$0")"`
+
+# purge sudo password cache (if set previously), and reset other sudo related variables
 sudo -k
 is_sudo=0
 SUDOPWD=
 
+# who *am* I?
 login_user=$(logname)
 current_user=`whoami`
-im_root=0
+# am I root??
+if [ "$EUID" -eq 0 ]; then
+  im_root=true
+else
+  im_root=false
+fi
 
 CRYPTPWD=
 
@@ -94,38 +103,44 @@ CRYPTPWD=
 : ${DIALOG_OK=0}
 : ${DIALOG_CANCEL=1}
 
+
 # FUNCTIONS ==================================================================
 
-exists()
-{
+# exists for commands
+exists() {
   command -v "$1" >/dev/null 2>&1
 }
 
-validate_sudopwd()
-{
-  if [ "$is_sudo" = "1" ] ; then
+validate_sudopwd() {
+  if [ "$is_sudo" = "1" ]; then
     break
   else
     dialog --title "ERROR" --msgbox "\nINCORRECT SUDO PASSWORD!\n\nPlease try again!" 9 30
   fi
 }
 
-get_sudo_pwd()
-{
+get_sudo_pwd() {
   # get password
   while true; do
-    SUDOPWD=$(dialog --title "Enter sudo password" --insecure --passwordbox "\nThis script requires sudo access. Please enter your sudo password (your login password) to be used for the elevated script operations. The password will be cached internally by this script, but depending on your system policy, you may be re-prompted for sudo password later.\n\n" 13 60  2>&1 > /dev/tty)
+    SUDOPWD=$(dialog --title "Enter sudo password" --insecure --passwordbox "\nThis script requires sudo access. Please enter your sudo password (your login password) to be used for the elevated script operations. The password will be cached internally by this script, but depending on your system policy, you may be re-prompted for sudo password later.\n\nNOTE: If your username is allowed to execute sudo without a password, enter an empty password above (i.e. simply press OK).\n\n" 18 70  2>&1 > /dev/tty)
     ret=$?
 
+    # first clear sudo password cache
     sudo -k
-    echo ${SUDOPWD} | sudo -S -v &> /dev/null
 
-    # evaluate sudo password test
-    if [ $? -ne 0 ]; then 
-      is_sudo=0;
+    # first check if the user is allowed to execute sudo without a password
+    if sudo -n true 2>/dev/null; then
+      is_sudo=1
     else
-      is_sudo=1;
-    fi    
+      # that didn't work.. now let's see if sudo is allowed with the cached password
+      echo ${SUDOPWD} | sudo -S -v &> /dev/null
+
+      if [ $? -ne 0 ]; then
+        is_sudo=0
+      else
+        is_sudo=1
+      fi
+    fi
 
     # ok (proceed) / cancel
     case $ret in
@@ -139,9 +154,8 @@ get_sudo_pwd()
 
 # sudo for system operations
 # use the locally cached sudo password if sudo doesn't cache the password by policy (or if it has expired)
-sudoit()
-{
-  if [ "$im_root" -eq 0 ] ; then
+sudoit() {
+  if [ "$im_root" = "false" ]; then
     if sudo -n true 2>/dev/null; then 
       sudo "$@"
     else
@@ -149,14 +163,13 @@ sudoit()
     fi
   else
     # running as root, no sudo needed
-    "$@"
+    eval "$@"
   fi
 }
 
 # always sudo because executing as a different user
 # use the locally cached sudo password if sudo doesn't cache the password by policy (or if it has expired)
-sudoitas()
-{
+sudoitas() {
   sudo_user=$1
   shift
   if sudo -n true 2>/dev/null; then 
@@ -164,10 +177,13 @@ sudoitas()
   else
     echo ${SUDOPWD} | sudo -S -u $sudo_user "$@"  &> /dev/null
   fi
+#TODO: return code should sent back to the caller
+# like with something like this:
+# eval "$1=$_ret"
+# .. but can we, with piped commands?
 }
 
-find_existing_parent()
-{
+find_existing_parent() {
   pathname="$2"
 
   if [ -d "$pathname" ]; then
@@ -189,74 +205,105 @@ find_existing_parent()
   fi
 }
 
-find_dir_owner()
-{
+find_dir_owner() {
   dirowner=$(ls -ld $2 | awk '{print $3}')
   eval "$1=$dirowner"
 }
 
-cleanup()
-{
-  echo
-  echo -e "\e${BIRed}Cleaning up after interrupt...\e${Color_Off}"  
-
-  # export zfs pool, umount ext4 fs
-  dismounted="false"
-  if [ "$CRYPTOFS" = "zfs" ]; then
-
-    #export zfs
-    while [ "$dismounted" = "false" ]; do
-      sudoit zpool export $zpool_id
-      if [ $? -ne 0 ]; then
-        echo "Unable to unmount the disk; device is busy. Free the device and try again."
-        echo "The following process(es) hold the mount:"
-        x=(); for a in $(mount | cut -d' ' -f3); do test -e "$a" || x+=("-e$a"); done
-        lsof "${x[@]}" -f -- ${MOUNTPATH}
-        echo
-        read -p "Press any key to retry unmount! " -n1 -s
-      else
-        dismounted="true"
-      fi
-    done
-    echo "zfs pool exported."
-
+# check mountpath against mounts in /proc/mounts
+check_mounted() {
+  if grep -qsE "^[^ ]+ $1" /proc/mounts; then
+    _RET=true
   else
-  
-    # unmount ext4
-    while [ "$dismounted" = "false" ]; do
-      sudoit umount ${MOUNTPATH}
-      if [ $? -ne 0 ]; then
-          echo "Unable to unmount the disk; device is busy. Free the device and try again."
+    _RET=false
+  fi
+}
+
+# revert made changes (such as after an partially completed setup)
+cleanup() {
+  echo
+  echo -e "\e${BIRed}Cleaning up...\e${Color_Off}"  
+
+  check_mounted $MOUNTPOINT
+  if ${_RET} ; then
+    # cryptovault is currently mounted.. start by attempting to unmount
+    
+    # export zfs pool, umount ext4 fs
+    dismounted="false"
+    if [ "$CRYPTOVAULT_FS" = "zfs" ]; then
+
+      #export zfs
+      while [ "$dismounted" = "false" ]; do
+        sudoit zpool export $zpool_id > /dev/null 2>&1
+        if [ $? -ne 0 ]; then
+          echo "Unable to unmount the crypto vault; the device is busy. Free the device (such as make sure you aren't currently cd'd in the crypto vault, or that you don't have files open from the vault), and try again."
           echo "The following process(es) hold the mount:"
           x=(); for a in $(mount | cut -d' ' -f3); do test -e "$a" || x+=("-e$a"); done
-          lsof "${x[@]}" -f -- ${MOUNTPATH}
+          lsof "${x[@]}" -f -- ${MOUNTPOINT}
           echo
           read -p "Press any key to retry unmount! " -n1 -s
-      else
-        dismounted="true"
-      fi
-    done
-    echo "ext4 filesystem unmounted at ${MOUNTPATH}."
-    
-  fi  
+        else
+          dismounted="true"
+        fi
+      done
+      echo "zfs pool exported (file system dismounted) from mountpoint ${MOUNTPOINT}."
 
-  # remove mapped disk
-  if [ -b /dev/mapper/${CRYPTOVAULTLABEL} ]; then
-    sudoit cryptsetup luksClose /dev/mapper/${CRYPTOVAULTLABEL}
-    echo "Mapped device /dev/mapper/${CRYPTOVAULTLABEL} removed."
+    else
+  
+      # unmount ext4
+      while [ "$dismounted" = "false" ]; do
+        sudoit umount ${MOUNTPOINT} > /dev/null 2>&1
+        if [ $? -ne 0 ]; then
+            echo "Unable to unmount the crypto vault; the device is busy. Free the device (such as make sure you aren't currently cd'd in the crypto vault, or that you don't have files open from the vault), and try again."
+            echo "The following process(es) hold the mount:"
+            x=(); for a in $(mount | cut -d' ' -f3); do test -e "$a" || x+=("-e$a"); done
+            lsof "${x[@]}" -f -- ${MOUNTPOINT}
+            echo
+            read -p "Press any key to retry unmount! " -n1 -s
+        else
+          dismounted="true"
+        fi
+      done
+      echo "ext4 filesystem unmounted from mountpoint ${MOUNTPOINT}."
+    
+    fi  
+
+  else
+    # crypto vault is not mounted at this point (perhaps it never was as this is cleanup)
+    dismounted="true"
+
+  fi
+
+  # remove mapped disk if present
+  if [ -b /dev/mapper/${CRYPTOVAULT_LABEL} ]; then
+    sudoit cryptsetup luksClose /dev/mapper/${CRYPTOVAULT_LABEL}
+    echo "Mapped device /dev/mapper/${CRYPTOVAULT_LABEL} removed."
   fi
 
   if ! sudo -n true 2>/dev/null; then 
     echo -e "\e${IYellow}This operation requires you to re-enter your sudo password below:\e${Color_Off}"
   fi 
-  # acquire loop device
-  loopdev2del=`sudo losetup --raw | grep ${VAULTPATH}/${CRYPTOVAULTLABEL} | awk '{print $1}'`
-  # delete loop device
+  # acquire a free loop device
+  loopdev2del=`sudo losetup --raw | grep ${VAULTFILE_FQFN} | awk '{print $1}'`
+  # delete the assigned loop device if present
   if [ "$loopdev2del" != "" ]; then
     sudoit losetup -d $loopdev2del > /dev/null 2>&1
-    echo "Loop device $loopdev2del removed."
+    echo "Assigned loop device $loopdev2del removed."
   fi
-  echo "Exiting.."
+
+#TODO: Add "nodelete" for a successful setup where user chooses not to leave the vault open
+  if [ -d $CRYPTOVAULT_COMMANDDIR ]; then
+    rm -rf $CRYPTOVAULT_COMMANDDIR
+    echo "Generated command files removed."
+  fi
+
+# when no "nodelete":
+#TODO: delete the vault file (i.e. VAULTFILE_FQFN) if present
+#TODO: delete the vault dir [only the last part] (if it was created, i.e. vaultpath_exists="false", and if it's empty now)
+#TODO: delete the mount point dir (if it was created, i.e. mountpoint_exists="false", and if it's empty)
+
+  echo
+  echo "Cleanup complete. Exiting."
   echo
   exit 1
 }
@@ -270,16 +317,16 @@ This script requires dialog. Install it first with 'sudo apt-get install dialog'
   exit 1
 fi
 
-if [ "$EUID" -ne 0 ] ; then
-  if [ $is_sudo -eq 0 ] ; then
+if [ "$EUID" -ne 0 ]; then
+  if [ $is_sudo -eq 0 ]; then
     get_sudo_pwd
   fi
 else
-  im_root=1  
+  im_root=true  
 fi
 
 CRYPTSETUP=`sudo which cryptsetup`
-if [ $? -ne 0 ] ; then
+if [ $? -ne 0 ]; then
   printf "\n*********************************************************************************************************\n\
 This script requires cryptsetup. Install it first with 'sudo apt-get install cryptsetup', then try again!\n\
 *********************************************************************************************************\n\n"
@@ -290,7 +337,7 @@ fi
 # MAIN LOGIC: QUERY VAULT PARAMETERS =========================================
 
 # FILE SYSTEM SELECTION
-CRYPTOFSSEL=$(dialog --title "Select crypto vault file system" --radiolist "\nSelect the file system for the encrypted vault.\nZFS is recommended for multiple reasons.\n\n
+SELECT_CRYPTO_FS=$(dialog --title "Select crypto vault file system" --radiolist "\nSelect the file system for the encrypted vault.\nZFS is recommended for multiple reasons.\n\n
 NOTE: Highlight the choice with up/down arrow, select with SPACE." 20 55 2 \
             1 zfs on \
             2 ext4 off \
@@ -305,25 +352,25 @@ case $ret in
     exit 1;;
 esac
 
-if [ "$CRYPTOFSSEL" = "1" ] ; then
-  CRYPTOFS=zfs
+if [ "$SELECT_CRYPTO_FS" = "1" ]; then
+  CRYPTOVAULT_FS="zfs"
 
   ZFS=`sudo which zfs`
-  if [ $? -ne 0 ] ; then
-    printf "\n\n******************************************************************************************************************************\n\
-To use ZFS filesystem zfsutils-linux is required. Install it first with 'sudo apt-get install zfsutils-linux', then try again!\
-\n******************************************************************************************************************************\n\n\n"
+  if [ $? -ne 0 ]; then
+    printf "\n\n**************************************************************************************************************************************\n\
+To use ZFS filesystem zfsutils-linux package is required. Install it first with 'sudo apt-get install zfsutils-linux', then try again!\
+\n**************************************************************************************************************************************\n\n\n"
     exit 1
   fi
 
 else
-  CRYPTOFS=ext4
+  CRYPTOVAULT_FS="ext4"
 fi
 
 
 # ENCRYPTION PASSWORD SELECTION
 while true; do
-  CRYPTPWD1=$(dialog --title "Enter encryption password" --insecure --passwordbox "\nEnter the passphrase you want the vault to be encrypted with.\n\n" 12 50  2>&1 > /dev/tty)
+  CRYPT_PASS_SEL_1=$(dialog --title "Enter encryption password" --insecure --passwordbox "\nEnter the passphrase you want the vault to be encrypted with.\n\n" 12 50  2>&1 > /dev/tty)
   ret=$?
 
   # ok (proceed) / cancel
@@ -334,7 +381,7 @@ while true; do
       exit 1;;
   esac
 
-  CRYPTPWD2=$(dialog --title "Repeat encryption password" --insecure --passwordbox "\nEnter again the passphrase you want the vault to be encrypted with.\n\n" 12 50 2>&1 > /dev/tty)
+  CRYPT_PASS_SEL_2=$(dialog --title "Repeat encryption password" --insecure --passwordbox "\nEnter again the passphrase you want the vault to be encrypted with.\n\n" 12 50 2>&1 > /dev/tty)
   ret=$?
 
   # ok (proceed) / cancel
@@ -345,12 +392,12 @@ while true; do
       exit 1;;
   esac
 
-  if [ "$CRYPTPWD1" = "$CRYPTPWD2" ] ; then
+  if [ "${CRYPT_PASS_SEL_1}" = "${CRYPT_PASS_SEL_2}" ]; then
 
-    if [ "$CRYPTPWD1" = "" ] ; then
+    if [ "${CRYPT_PASS_SEL_1}" = "" ]; then
       dialog --title "ERROR" --msgbox "\nAn empty passphrase is not allowed!\n\nPlease try again!" 9 30
     else 
-      CRYPTPWD=$CRYPTPWD1
+      CRYPTPWD=$CRYPT_PASS_SEL_1
       break
     fi
   else
@@ -361,7 +408,7 @@ done
 
 # VAULT SIZE SELECTION
 while true; do
-  CRYPTOVAULTSIZEINPUT=$(dialog --title "Enter desired crypto vault size" --inputbox "\nEnter the desired vault size in\nmegabytes (MB) or gigabytes (GB).\n\nPlease be mindful of the available drive space.\n\n" 14 55 512MB 2>&1 > /dev/tty)
+  CRYPTOVAULTSIZEINPUT=$(dialog --title "Enter desired crypto vault size" --inputbox "\nEnter the desired crypto vault size in\nmegabytes (MB) or gigabytes (GB).\n\nPlease be mindful of the available drive space.\n\n" 14 55 512MB 2>&1 > /dev/tty)
   ret=$?
 
   # ok (proceed) / cancel
@@ -372,15 +419,15 @@ while true; do
       exit 1;;
   esac
   
-  if [[ $CRYPTOVAULTSIZEINPUT =~ ^([0-9]+)[[:space:]]*(MB|Mb|mb|GB|Gb|gb)$ ]] ; then
+  if [[ $CRYPTOVAULTSIZEINPUT =~ ^([0-9]+)[[:space:]]*(MB|Mb|mb|GB|Gb|gb)$ ]]; then
     VAULTSIZEVAL=${BASH_REMATCH[1]}
     VAULTSIZEUNIT=$(echo "${BASH_REMATCH[2]}" | awk '{print toupper($0)}')
 
-    zfssizefault=false
-    if [ "$CRYPTOFS" = "zfs" ] &&
+    zfssizefault="false"
+    if [ "$CRYPTOVAULT_FS" = "zfs" ] &&
        [ "$VAULTSIZEUNIT" = "MB" ] &&
        [ $VAULTSIZEVAL -lt 128 ]; then
-          zfssizefault=true
+          zfssizefault="true"
           dialog --title "ERROR" --msgbox "\nZFS filesystem requires minimum vault size of 128MB!" 8 60
     fi
     
@@ -388,7 +435,7 @@ while true; do
       break
     fi
   else
-    dialog --title "ERROR" --msgbox "\nUnacceptable vault size!\n\nPlease enter the numeric size (integers only), followed by \"MB\" or \"GB\"!" 14 50
+    dialog --title "ERROR" --msgbox "\nUnacceptable crypto vault size!\n\nPlease enter the numeric size (integers only), followed by \"MB\" or \"GB\"!" 14 50
   fi
   
 done
@@ -396,9 +443,9 @@ done
 
 # VAULT FILE LOCATION
 if [ "$current_user" = "root" ]; then
-  SYSTEMEXAMPLE="\nSuggested system-wide vault file location: /var/vaultfiles"
+  vaulthome_example="\nSuggested system-wide mountpoint location: /mnt/cryptovault"
 else
-  SYSTEMEXAMPLE=''
+  vaulthome_example="\nSuggested mountpoint location: ${HOME}/cryptovault"
 fi
 
 while true; do
@@ -408,13 +455,13 @@ NOTE: In this step you will select the directory where the vault file is saved. 
 NOTE: Use Up/Dn [arrow] to move to move the selector, SPACE to copy selected directory to the edit line, and ENTER to accept the current path in the edit box. 
 To move to subdir/parent, add/remove \"/\" after the directory name on the edit line.\n\n
 NOTE: If a non-existent path is entered, the directory/directories will be created.\n\n
-Suggested vault file location: ${HOME}/vaultfiles${SYSTEMEXAMPLE}" 25 75
+${vaulthome_example}" 25 75
 
-  VAULTPATH=$(dialog --title "Vault file location selection" --dselect ${HOME}/ 16 60 2>&1 > /dev/tty)
+  VAULTFILE_HOME=$(dialog --title "Vault file location selection" --dselect ${HOME}/ 16 60 2>&1 > /dev/tty)
   ret=$?
 
   #remove slash from the end if there is one
-  VAULTPATH=${VAULTPATH%/}
+  VAULTFILE_HOME=${VAULTFILE_HOME%/}
   
   case $ret in
     0)
@@ -423,26 +470,26 @@ Suggested vault file location: ${HOME}/vaultfiles${SYSTEMEXAMPLE}" 25 75
       exit 1;;
   esac
 
-  find_existing_parent vaultpath_existing_parent $VAULTPATH
+  find_existing_parent vaultpath_existing_parent $VAULTFILE_HOME
   find_dir_owner vaultpath_owner $vaultpath_existing_parent
 
-  PATHMORE=''
+  vaulthome_owner_info=""
   if [ "$current_user" != "$vaultpath_owner" ]; then
     if [ "$vaultpath_owner" = "root" ]; then
-      PATHMORE="The selected location a system location, and will be owned by the root user.\n\n"
+      vaulthome_owner_info="The selected location a system location, and will be owned by the root user.\n\n"
     else
-      PATHMORE="The selected location is owned by user \"$vaultpath_owner\", and the vault file will be made private to that user.\n\n"
+      vaulthome_owner_info="The selected location is owned by user \"$vaultpath_owner\", and the vault file will be made private to that user.\n\n"
     fi
   fi
 
-  PATHDETAIL=''
-  vaultpath_exists=true
-  if [ ! -d "$VAULTPATH" ]; then
-    PATHDETAIL="This directory does not exist; it will be created."
-    vaultpath_exists=false
+  path_creation_info=""
+  vaultpath_exists="true"
+  if [ ! -d "$VAULTFILE_HOME" ]; then
+    path_creation_info="This directory does not exist; it will be created."
+    vaultpath_exists="false"
   fi
 
-  dialog --title "Confirm selected vault file location" --yesno "\nYou selected vault file location:\n\n${VAULTPATH}\n\n${PATHDETAIL}\n\n${PATHMORE}Is this what you want?" 16 70
+  dialog --title "Confirm selected vault file location" --yesno "\nYou selected vault file location:\n\n${VAULTFILE_HOME}\n\n${path_creation_info}\n\n${vaulthome_owner_info}Is this what you want?" 16 70
   ret=$?
   
   case $ret in
@@ -457,8 +504,8 @@ done
 
 # VAULT LABEL/FILE NAME
 while true; do
-  CRYPTOVAULTLABELINPUT=$(dialog --title "Crypto Vault Label/File Name" --inputbox "\nEnter the desired vault label (no spaces). It will also be used as the vault file name.\n\n
-NOTE: Since vaults are mapped through /dev/mapper system-wide (even when access is limited to a specific user), the label must be unique.\n" 14 55 2>&1 > /dev/tty)
+  CRYPTOVAULT_LABEL_INPUT=$(dialog --title "Crypto Vault Label/File Name" --inputbox "\nEnter the desired crypto vault label (no spaces). It will also be used as the crypto vault file name.\n\n
+NOTE: Since the crypto vaults are mapped through /dev/mapper system-wide (even when access is limited to a specific user), the label must be unique on the system.\n" 14 55 2>&1 > /dev/tty)
   ret=$?
 
   # ok (proceed) / cancel
@@ -469,37 +516,37 @@ NOTE: Since vaults are mapped through /dev/mapper system-wide (even when access 
       exit 1;;
   esac
 
-  CRYPTOVAULTLABEL=$(echo "${CRYPTOVAULTLABELINPUT// /}")
+  CRYPTOVAULT_LABEL=$(echo "${CRYPTOVAULT_LABEL_INPUT// /}")
 
-  if [ "$CRYPTOVAULTLABEL" = "" ] ||
-     [[ $CRYPTOVAULTLABEL =~ ^[_.=-]*$ ]]; then
+  if [ "$CRYPTOVAULT_LABEL" = "" ] ||
+     [[ $CRYPTOVAULT_LABEL =~ ^[_.=-]*$ ]]; then
 
-    dialog --title "ERROR" --msgbox "Vault file name cannot be empty or contain only hyphens/underscores/spaces. Please select a valid name." 14 50
+    dialog --title "ERROR" --msgbox "Crypto vault file name cannot be empty, or contain only hyphens/underscores/spaces. Please select a valid name." 14 50
 
   else
 
-    vaultname_conflict=false
-    mapper_conflict=false
+    vaultname_conflict="false"
+    mapper_conflict="false"
     for i in /dev/mapper/*; do
       thisbase=$(basename $i)
-      if [ "$thisbase" = "$CRYPTOVAULTLABEL" ]; then
-        vaultname_conflict=true
-        mapper_conflict=true
+      if [ "$thisbase" = "$CRYPTOVAULT_LABEL" ]; then
+        vaultname_conflict="true"
+        mapper_conflict="true"
       fi
     done
 
-    for i in $VAULTPATH/*; do
+    for i in $VAULTFILE_HOME/*; do
       thisbase=$(basename $i)
-      if [ "$thisbase" = "$CRYPTOVAULTLABEL" ]; then
-        vaultname_conflict=true
+      if [ "$thisbase" = "$CRYPTOVAULT_LABEL" ]; then
+        vaultname_conflict="true"
       fi
     done
 
     if [ "$vaultname_conflict" = "true" ]; then
       if [ "$mapper_conflict" = "true" ]; then
-         vaultname_conflict_message="\nThe crypto vault label you have chosen ($CRYPTOVAULTLABEL) conflicts with an already mapped vault.\n\nPlease choose another label/filename!"
+         vaultname_conflict_message="\nThe crypto vault label you have chosen ($CRYPTOVAULT_LABEL) conflicts with an already mapped vault.\n\nPlease choose another label/filename!"
       else
-         vaultname_conflict_message="\nThe crypto vault label you have chosen ($CRYPTOVAULTLABEL) conflicts with an existing vault file at your chosen vault file path ($VAULTPATH).\n\nPlease choose another label/filename!"
+         vaultname_conflict_message="\nThe crypto vault label you have chosen ($CRYPTOVAULT_LABEL) conflicts with an existing vault file at your chosen vault file path ($VAULTFILE_HOME).\n\nPlease choose another label/filename!"
       fi    
 
       dialog --title "ERROR" --msgbox "$vaultname_conflict_message" 14 50
@@ -513,8 +560,8 @@ NOTE: Since vaults are mapped through /dev/mapper system-wide (even when access 
       esac
 
     else
-      VAULTFQFN=${VAULTPATH}/${CRYPTOVAULTLABEL}
-      dialog --title "Confirm selected label/filename" --yesno "\nYou selected vault label / file name:\n\n${CRYPTOVAULTLABEL}\n\nThe full vault file path will be:\n\n${VAULTFQFN}\n\nIs this what you want?" 16 70
+      VAULTFILE_FQFN=${VAULTFILE_HOME}/${CRYPTOVAULT_LABEL}
+      dialog --title "Confirm selected label/filename" --yesno "\nYou selected crypto vault label / file name:\n\n${CRYPTOVAULT_LABEL}\n\nThe full vault file path will be:\n\n${VAULTFILE_FQFN}\n\nIs this what you want?" 16 70
       ret=$?
   
       case $ret in
@@ -533,9 +580,9 @@ done
 
 # VAULT MOUNTPOINT
 if [ "$current_user" = "root" ]; then
-  SYSTEMEXAMPLE="\nSuggested system-wide mountpoint location: /mnt/cryptodisk"
+  mountpoint_example="\nSuggested system-wide mountpoint location: /mnt/cryptovault"
 else
-  SYSTEMEXAMPLE=''
+  mountpoint_example="\nSuggested mountpoint location: ${HOME}/cryptovault"
 fi
 
 while true; do
@@ -545,13 +592,13 @@ NOTE: Use Up/Dn [arrow] to move to move the selector, SPACE to copy selected dir
 To move to subdir/parent, add/remove \"/\" after the directory name on the edit line.\n\n
 NOTE: If a non-existent path is entered, the directory/directories will be created. Existing but non-empty directories are not accepted. This directory can not be used for other purposes.\n\n
 NOTE: Global locations (e.g. /mnt/mountdir) are set up for root access, while user-owned locations (e.g. /home/alice/mountdir) are set up for the owner of the parent dir (i.e. \"alice\" in this example).\n\n
-Suggested mountpoint location: ${HOME}/cryptodisk${SYSTEMEXAMPLE}" 27 75
+${mountpoint_example}" 27 75
 
-  MOUNTPATH=$(dialog --title "Mountpoint selection" --dselect ${HOME}/ 16 60 2>&1 > /dev/tty)
+  MOUNTPOINT=$(dialog --title "Mountpoint selection" --dselect ${HOME}/ 16 60 2>&1 > /dev/tty)
   ret=$?
 
   #remove slash from the end if there is one
-  MOUNTPATH=${MOUNTPATH%/}
+  MOUNTPOINT=${MOUNTPOINT%/}
   
   case $ret in
     0)
@@ -560,47 +607,45 @@ Suggested mountpoint location: ${HOME}/cryptodisk${SYSTEMEXAMPLE}" 27 75
       exit 1;;
   esac
 
-  find_existing_parent mountpath_existing_parent $MOUNTPATH
+  find_existing_parent mountpath_existing_parent $MOUNTPOINT
   find_dir_owner mountpath_owner $mountpath_existing_parent
 
-  DIFF_OWNERS=''
+  different_owners_WARNING=""
   if [ "$vaultpath_owner" != "$mountpath_owner" ]; then
-    DIFF_OWNERS="WARNING: THE VAULT FILE PATH ($VAULTPATH), AND THE MOUNTPOINT PATH ($MOUNTPATH) ARE OWNED BY DIFFERENT USERS (\"$vaultpath_owner\" and \"$mountpath_owner\", respectively). I can proceed, but this is *probably* not what you want!\n\n"
+    different_owners_WARNING="WARNING: THE VAULT FILE PATH ($VAULTFILE_HOME), AND THE MOUNTPOINT PATH ($MOUNTPOINT) ARE OWNED BY DIFFERENT USERS (\"$vaultpath_owner\" and \"$mountpath_owner\", respectively). I can proceed, but this is *probably* not what you want!\n\n"
   fi
 
-
-
-  PATHDETAIL=
+  mountpoint_info=""
   confirm=false
   mountpoint_exists=true
-  if [ "$MOUNTPATH" = "$VAULTPATH" ]; then
-    PATHDETAIL="Vault file path and the mountpoint cannot be the same directory; the mountpoint directory must always remain empty."
+  if [ "$MOUNTPOINT" = "$VAULTFILE_HOME" ]; then
+    mountpoint_selection_info="Vault file path and the mountpoint cannot be the same directory; the mountpoint directory must always remain empty."
   else    
-    if [ -d "$MOUNTPATH" ]; then
-      if [ "$(ls -A $MOUNTPATH)" ]; then
-        PATHDETAIL="This directory is not empty.\n\nSelect an empty directory, or create new."
+    if [ -d "$MOUNTPOINT" ]; then
+      if [ "$(ls -A $MOUNTPOINT)" ]; then
+        mountpoint_selection_info="This directory is not empty.\n\nSelect an empty directory, or create new."
       else
-        PATHDETAIL="This directory exists and it is empty."
+        mountpoint_selection_info="This directory exists and it is empty."
         confirm=true
       fi
     else
-      PATHMORE=''
+      mountpoint_owner_info=''
       if [ "$current_user" != "$mountpath_owner" ]; then
         if [ "$mountpath_owner" = "root" ]; then
-          PATHMORE="The selected mountpoint path is a system location, and will be owned by the root user.\n\n"
+          mountpoint_owner_info="The selected mountpoint path is a system location, and will be owned by the root user.\n\n"
         else
-          PATHMORE="The selected location is owned by user \"$mountpath_owner\", and the mountpoint will be made private to that user.\n\n"
+          mountpoint_owner_info="The selected location is owned by user \"$mountpath_owner\", and the mountpoint will be made private to that user.\n\n"
         fi
       fi
 
-      PATHDETAIL="This directory does not exist; it will be created."
+      mountpoint_selection_info="This directory does not exist; it will be created."
       confirm=true
       mountpoint_exists=false
     fi
   fi
 
   if [ "$confirm" = "true" ]; then
-    dialog --title "Confirm selected mountpoint" --yesno "\n${DIFF_OWNERS}You selected mountpoint path:\n\n${MOUNTPATH}\n\n${PATHDETAIL}\n\n${PATHMORE}Is this what you want?" 22 75
+    dialog --title "Confirm selected mountpoint" --yesno "\n${different_owners_WARNING}You selected mountpoint path:\n\n${MOUNTPOINT}\n\n${mountpoint_selection_info}\n\n${mountpoint_owner_info}Is this what you want?" 22 75
     ret=$?
   
     case $ret in
@@ -611,17 +656,17 @@ Suggested mountpoint location: ${HOME}/cryptodisk${SYSTEMEXAMPLE}" 27 75
     esac
   
   else
-    dialog --title "ERROR" --msgbox "\n$PATHDETAIL" 14 50
+    dialog --title "ERROR" --msgbox "\n$mountpoint_selection_info" 14 50
   fi
   
 done
 
 dialog --title "Confirm to proceed" --yesno "\nIf you proceed, the encrypted vault will be created with the following parameters you have entered:\n\n
-Vault filesystem: ${CRYPTOFS}\n
+Vault filesystem: ${CRYPTOVAULT_FS}\n
 Vault size: ${VAULTSIZEVAL}${VAULTSIZEUNIT}\n
-Vault label: ${CRYPTOVAULTLABEL}\n
-Vault file path: ${VAULTPATH}/${CRYPTOVAULTLABEL} (owned by $vaultpath_owner)\n
-Vault mount path: ${MOUNTPATH} (owned by $mountpath_owner)\n\n
+Vault label: ${CRYPTOVAULT_LABEL}\n
+Vault file path: ${VAULTFILE_FQFN} (owned by $vaultpath_owner)\n
+Vault mount path: ${MOUNTPOINT} (owned by $mountpath_owner)\n\n
 If the values are not correct, cancel and run the script again.\n\nDo you want to proceed?" 22 80
 ret=$?
   
@@ -641,7 +686,7 @@ echo
 trap cleanup INT ERR
 
 executing="\e${BGreen}EXECUTING\e${Color_Off}"
-if [ "$im_root" = "0" ]; then
+if [ "$im_root" = "false" ]; then
   elevated=" \e${Black}\e${On_Green}ELEVATED\e${Color_Off}"
 else
   elevated=''
@@ -650,7 +695,7 @@ fi
 # create vault path
 if [ "$vaultpath_exists" = "false" ]; then
   echo -e "\e${BIWhite}Creating vault path...\e${Color_Off}"
-  executable="mkdir -p $VAULTPATH"
+  executable="mkdir -p $VAULTFILE_HOME"
   if [ "$vaultpath_owner" = "$current_user" ]; then
     echo -e "$executing: $executable"
     eval $executable
@@ -660,8 +705,8 @@ if [ "$vaultpath_exists" = "false" ]; then
   fi
  
   # test 
-  if [ ! -d "$VAULTPATH" ]; then
-    echo -e "\e${BWhite}\e${On_Red}Could not create vault path \"${VAULTPATH}\". Unable to proceed.\e${Color_Off}"
+  if [ ! -d "$VAULTFILE_HOME" ]; then
+    echo -e "\e${BWhite}\e${On_Red}Could not create vault path \"${VAULTFILE_HOME}\". Unable to proceed.\e${Color_Off}"
     cleanup
   fi
 fi
@@ -675,7 +720,7 @@ if [ "$VAULTSIZEUNIT" = "GB" ]; then
 else
   vaultsize=$VAULTSIZEVAL
 fi
-executable="dd if=/dev/zero of=${VAULTPATH}/${CRYPTOVAULTLABEL} bs=1M count=$vaultsize"
+executable="dd if=/dev/zero of=${VAULTFILE_FQFN} bs=1M count=$vaultsize"
 if [ "$vaultpath_owner" = "$current_user" ]; then
   echo -e "$executing: $executable"
   eval $executable
@@ -685,8 +730,8 @@ else
 fi
 
 # test
-if [ ! -f "${VAULTPATH}/${CRYPTOVAULTLABEL}" ]; then
-  echo -e "\e${BWhite}\e${On_Red}Could not create vault container file \"${VAULTPATH}/${CRYPTOVAULTLABEL}\". Unable to proceed.\e${Color_Off}"
+if [ ! -f "${VAULTFILE_FQFN}" ]; then
+  echo -e "\e${BWhite}\e${On_Red}Could not create vault container file \"${VAULTFILE_FQFN}\". Unable to proceed.\e${Color_Off}"
   cleanup
 fi
 
@@ -694,8 +739,8 @@ echo
 
 # create mountpoint path
 if [ "$mountpoint_exists" = "false" ]; then
-  echo -e "\e${BIWhite}Creating mountpoint path...\e${Color_Off}"
-  executable="mkdir -p $MOUNTPATH"
+  echo -e "\e${BIWhite}Creating the mountpoint (an empty directory)...\e${Color_Off}"
+  executable="mkdir -p $MOUNTPOINT"
   if [ "$mountpath_owner" = "$current_user" ]; then
     echo -e "$executing: $executable"
     eval $executable
@@ -704,9 +749,9 @@ if [ "$mountpoint_exists" = "false" ]; then
     sudoitas $mountpath_owner $executable
   fi
   
-  #test
-  if [ ! -d "$MOUNTPATH" ]; then
-    echo -e "\e${BWhite}\e${On_Red}Could not create mountpoint path \"${MOUNTPATH}\". Unable to proceed.\e${Color_Off}"
+  # test to make sure mountpath got created
+  if [ ! -d "$MOUNTPOINT" ]; then
+    echo -e "\e${BWhite}\e${On_Red}Could not create the mountpoint at \"${MOUNTPOINT}\". Unable to proceed.\e${Color_Off}"
     cleanup
   fi
 fi
@@ -715,16 +760,16 @@ echo
 
 # format the container
 echo -e "\e${BIWhite}Formatting the container with encrypted LUKS filesystem...\e${Color_Off}"
-echo -e "${executing}$elevated: cryptsetup luksFormat -q ${VAULTPATH}/${CRYPTOVAULTLABEL}"
+echo -e "${executing}$elevated: cryptsetup luksFormat -q ${VAULTFILE_FQFN}"
 
-if [ "$im_root" -eq 0 ] ; then
+if [ "$im_root" = "false" ]; then
   if ! sudo -n true 2>/dev/null; then 
     echo -e "\e${IYellow}This operation requires you to re-enter your sudo password below:\e${Color_Off}"
   fi
-  echo -n "$CRYPTPWD" | sudo cryptsetup luksFormat -q ${VAULTPATH}/${CRYPTOVAULTLABEL} -
+  echo -n "$CRYPTPWD" | sudo cryptsetup luksFormat -q ${VAULTFILE_FQFN} -
 else
   # running as root, no sudo needed (even when creting for a different user, this is only access to cryptsetup command)
-  echo -n "$CRYPTPWD" | cryptsetup luksFormat -q ${VAULTPATH}/${CRYPTOVAULTLABEL} -
+  echo -n "$CRYPTPWD" | cryptsetup luksFormat -q ${VAULTFILE_FQFN} -
 fi
 
 echo
@@ -736,59 +781,63 @@ if ! sudo -n true 2>/dev/null; then
 fi
 loopdev=`sudo losetup -f`
 echo "Using loop device: $loopdev"
-executable="losetup $loopdev ${VAULTPATH}/${CRYPTOVAULTLABEL}"
+executable="losetup $loopdev ${VAULTFILE_FQFN}"
 echo -e "${executing}$elevated: $executable"
 sudoit $executable
 
-DNAM=${CRYPTOVAULTLABEL}; LDEV=`sudo losetup --raw | grep $DNAM | awk '{print $1}'`;
+#TODO: could sudoit/sudoitas return the error code as 'ret' or something?
 
-#TODO: to confirm/test, pull label with $loopdev, compare to the label
+DNAM=${CRYPTOVAULT_LABEL}; LDEV=`sudo losetup --raw | grep $DNAM | awk '{print $1}'`;
+
+#TODO: to confirm/test, pull label with $loopdev, compare to CRYPTVAULT_LABEL
 
 echo
 
 # open the mapped loop device (req. selected encryption password)
 echo -e "\e${BIWhite}Opening the mapped device...\e${Color_Off}"
-executable="cryptsetup luksOpen $loopdev ${CRYPTOVAULTLABEL}"
+executable="cryptsetup luksOpen $loopdev ${CRYPTOVAULT_LABEL}"
 echo -e "${executing}$elevated: $executable"
 echo -e "\e${IYellow}The encrypted device is being opened. Please enter below the encryption password\nyou selected earlier in the process (NOTE: typed characters will not echo).\e${Color_Off}"
 sudoit $executable
 
+#TODO: Collect errors from luksOpen!
+
 echo
 
 # create and mount the filesystem
-echo -e "\e${BIWhite}Creating the ${CRYPTOFS} filesystem...\e${Color_Off}"
-if [ "$CRYPTOFS" = "zfs" ]; then
-  zpool_id="zpool-${CRYPTOVAULTLABEL}"
-  echo "zpool ID for this cryptodisk is: $zpool_id"
-  executable="zpool create -o ashift=12 -O atime=off -O compression=lz4 -O normalization=formD -O mountpoint=/ -m ${MOUNTPATH} $zpool_id /dev/mapper/${CRYPTOVAULTLABEL}"
+echo -e "\e${BIWhite}Creating the ${CRYPTOVAULT_FS} filesystem...\e${Color_Off}"
+if [ "$CRYPTOVAULT_FS" = "zfs" ]; then
+  zpool_id="zpool-${CRYPTOVAULT_LABEL}"
+  echo "zpool ID for this crypto vault is: $zpool_id"
+  executable="zpool create -o ashift=12 -O atime=off -O compression=lz4 -O normalization=formD -O mountpoint=/ -m ${MOUNTPOINT} $zpool_id /dev/mapper/${CRYPTOVAULT_LABEL}"
   echo -e "${executing}$elevated: $executable"  
   sudoit $executable
   echo "Currently mounted zfs filesystems:"
   sudoit zfs list
 else
-  executable="mkfs.ext4 /dev/mapper/${CRYPTOVAULTLABEL}"
+  executable="mkfs.ext4 /dev/mapper/${CRYPTOVAULT_LABEL}"
   echo -e "${executing}$elevated: $executable"
   sudoit $executable
-  executable_mount="mount /dev/mapper/${CRYPTOVAULTLABEL} ${MOUNTPATH}"
+  executable_mount="mount /dev/mapper/${CRYPTOVAULT_LABEL} ${MOUNTPOINT}"
   echo "Mounting ext4 filesystem..."
   echo -e "${executing}$elevated: $executable_mount"
   sudoit $executable_mount
 fi
 
 # test the mount
-mounttest=`mount | grep --color=never "$zpool_id"`
-if [ "${mounttest}" = "" ]; then
-  echo -e "\e${BWhite}\e${On_Red}Could not mount the crypt disk at  \"${MOUNTPATH}\". Unable to proceed.\e${Color_Off}"
+check_mounted $MOUNTPOINT
+if ! ${_RET} ; then
+  echo -e "\e${BWhite}\e${On_Red}Could not mount the crypto vault at  \"${MOUNTPOINT}\". Unable to proceed.\e${Color_Off}"
   cleanup
 fi
 
 if [ "$mountpath_owner" != "root" ]; then
   echo
   echo -e "\e${BIWhite}Setting the mountpoint permissions...\e${Color_Off}"
-  executable="chmod 770 ${MOUNTPATH}"
+  executable="chmod 770 ${MOUNTPOINT}"
   echo -e "${executing}$elevated: $executable"
   sudoit $executable
-  executable="chown -R ${mountpath_owner} ${MOUNTPATH}"
+  executable="chown -R ${mountpath_owner} ${MOUNTPOINT}"
   echo -e "${executing}$elevated: $executable"
   sudoit $executable
 fi
@@ -798,91 +847,72 @@ echo
 
 # MAIN LOGIC: CREATE THE UTILITY SCRIPTS =====================================
 
-if [ ! -d ${SCRIPTDIR}/_stubs ] ||
-   [ ! -f ${SCRIPTDIR}/_stubs/mount-crypto ] ||
-   [ ! -f ${SCRIPTDIR}/_stubs/umount-crypto ] ||
-   [ ! -f ${SCRIPTDIR}/_stubs/util-crypto ]; then
+if [ ! -d ${SCRIPT_DIR}/_stubs ] ||
+   [ ! -f ${SCRIPT_DIR}/_stubs/mount-crypto ] ||
+   [ ! -f ${SCRIPT_DIR}/_stubs/umount-crypto ] ||
+   [ ! -f ${SCRIPT_DIR}/_stubs/util-crypto ]; then
   echo "The utility script stubs in \"_stubs\" subdirectory are missing. Unable to proceed. Please make sure that you have not altered the cloned \"cryptovault\" repository, and try again!"
   cleanup 
 fi
-cp ${SCRIPTDIR}/_stubs/mount-crypto ${SCRIPTDIR}/mount-${CRYPTOVAULTLABEL}
-cp ${SCRIPTDIR}/_stubs/umount-crypto ${SCRIPTDIR}/umount-${CRYPTOVAULTLABEL}
-cp ${SCRIPTDIR}/_stubs/util-crypto ${SCRIPTDIR}/util-${CRYPTOVAULTLABEL}
+
+#TODO: Should these utility scripts perhaps be copied to the homedir of the user who owns the mountpoint ($mountpath_owner)?
+#      mountpath_owner_home=`sudo su - $mountpath_owner -c 'echo ~'`
+#      Or perhaps inquire the user where they want these placed (and made executable to)?
+
+#TODO: with `cat` the vars get evaluated.. must either cat as-is, or find a different way
+
+CRYPTOVAULT_COMMANDDIR=$HOME/${CRYPTOVAULT_LABEL}-commands
+mkdir $CRYPTOVAULT_COMMANDDIR
+
+cp ${SCRIPT_DIR}/_stubs/mount-crypto ${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}
+cp ${SCRIPT_DIR}/_stubs/umount-crypto ${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL}
+cp ${SCRIPT_DIR}/_stubs/util-crypto ${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL}
+
+if [ "$CRYPTOVAULT_FS" = "zfs" ]; then
+  echo -e "#!/bin/bash\n
+CRYPTOVAULT_FS=${CRYPTOVAULT_FS}
+CRYPTOVAULT_FQFN=${VAULTFILE_FQFN}
+CRYPTOVAULT_MOUNTPOINT=${MOUNTPOINT}
+CRYPTOVAULT_LABEL=${CRYPTOVAULT_LABEL}
+ZPOOL_ID=${zpool_id}\n$(cat ${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL})" > ${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}
+
+else
+
+  echo -e "#!/bin/bash\n
+CRYPTOVAULT_FS=${CRYPTOVAULT_FS}
+CRYPTOVAULT_FQFN=${VAULTFILE_FQFN}
+CRYPTOVAULT_MOUNTPOINT=${MOUNTPOINT}
+CRYPTOVAULT_LABEL=${CRYPTOVAULT_LABEL}\n$(cat ${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL})" > ${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}
+
+fi
 
 echo -e "#!/bin/bash\n
-CRYPTO_MOUNTPOINT=${MOUNTPATH}
-CRYPTO_VAULTFILE=${VAULTPATH}/${CRYPTOVAULTLABEL}
-CRYPTO_LABEL=${CRYPTOVAULTLABEL}
-ZPOOL_ID=${zpool_id}\n$(cat ${SCRIPTDIR}/mount-${CRYPTOVAULTLABEL})" > ${SCRIPTDIR}/mount-${CRYPTOVAULTLABEL}
+CRYPTO_FQFN=${VAULTFILE_FQFN}
+CRYPTO_MOUNTPOINT=${MOUNTPOINT}
+CRYPTO_LABEL=${CRYPTOVAULT_LABEL}
+ZPOOL_ID=${zpool_id}\n$(cat ${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL})" > ${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL}
 
 echo -e "#!/bin/bash\n
-CRYPTO_MOUNTPOINT=${MOUNTPATH}
-CRYPTO_VAULTFILE=${VAULTPATH}/${CRYPTOVAULTLABEL}
-CRYPTO_LABEL=${CRYPTOVAULTLABEL}
-ZPOOL_ID=${zpool_id}\n$(cat ${SCRIPTDIR}/umount-${CRYPTOVAULTLABEL})" > ${SCRIPTDIR}/umount-${CRYPTOVAULTLABEL}
+CRYPTOVAULT_FS=${CRYPTOVAULT_FS}
+CRYPTO_FQFN=${VAULTFILE_FQFN}
+CRYPTO_MOUNTPOINT=${MOUNTPOINT}
+CRYPTO_LABEL=${CRYPTOVAULT_LABEL}
+ZPOOL_ID=${zpool_id}\n$(cat ${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL})" > ${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL}
 
-echo -e "#!/bin/bash\n
-CRYPTO_MOUNTPOINT=${MOUNTPATH}
-CRYPTO_VAULTFILE=${VAULTPATH}/${CRYPTOVAULTLABEL}
-CRYPTO_LABEL=${CRYPTOVAULTLABEL}
-ZPOOL_ID=${zpool_id}\n$(cat ${SCRIPTDIR}/util-${CRYPTOVAULTLABEL})" > ${SCRIPTDIR}/util-${CRYPTOVAULTLABEL}
+#TODO: set ownership & make executable for the commanddir & the commands (above)
 
 
 # MAIN LOGIC: PROCESS COMPLETED; WRAPPING UP =================================
 
-read -p "Cryptodisk has been created; press any key to continue... " -n1 -s
+read -p "Crypto vault has been created; press any key to continue... " -n1 -s
 
-dialog --title "Lock/unmount the new cryptodisk?" --yesno "\nDo you want to leave the newly created cryptodisk mounted and unlocked at \"${MOUNTPATH}\"?\n\n
-You can unmount/lock and remount/unlock the cryptodisk at any time using the \"mount-${CRYPTOVAULTLABEL}\" and \"umount-${CRYPTOVAULTLABEL}\" scripts that have been created in the same directory with this \"create-crypto\" script." 20 70
+dialog --title "Lock/unmount the new crypto vault?" --yesno "\nDo you want to leave the newly created crypto vault mounted and unlocked at \"${MOUNTPOINT}\"?\n\n
+You can unmount/lock and remount/unlock the crypto vault at any time using the \"mount-${CRYPTOVAULT_LABEL}\" and \"umount-${CRYPTOVAULT_LABEL}\" scripts that have been created in the same directory with this \"create-crypto\" script." 20 70
 ret=$?
   
 case $ret in
   0)
-    clear && echo && echo "Leaving the cryptodisk open at ${MOUNTPATH}" && echo;;
+    clear && echo && echo "Leaving the crypto vault open at ${MOUNTPOINT}" && echo;;
   1)
-    clear && echo && echo "Closing the cryptodisk." && cleanup;;
+    clear && echo && echo "Closing the crypto vault." && cleanup;;
 esac
-
-
-
-# CREATE ONLY: ✔
-# dd if=/dev/zero of=crypt-disk-two bs=1M count=128
-
-# CREATE ONLY: ✔
-# sudo cryptsetup luksFormat -q ${VAULTPATH}/${CRYPTOVAULTLABEL}
-
-# CREATE/OPEN: ✔
-# sudo losetup -f;echo "The loop device in use is ${LDEV}"; sudo losetup $LDEV ${VAULTPATH}/${CRYPTOVAULTLABEL}
-
-# CREATE/OPEN: ✔
-# DNAM=${CRYPTOVAULTLABEL}; LDEV=`sudo losetup --raw | grep $DNAM | awk '{print $1}'`; sudo cryptsetup luksOpen $LDEV $DNAM
-
-# CREATE ONLY: ✔
-# zfs:
-# sudo zpool create -o ashift=12 -O atime=off -O compression=lz4 -O normalization=formD -O mountpoint=/ -m ${MOUNTPATH} zpool-${CRYPTOVAULTLABEL} ${VAULTPATH}/${CRYPTOVAULTLABEL}
-# ext4:
-# sudo mkfs.ext4 /dev/mapper/${CRYPTOVAULTLABEL}
-
-# --
-
-# REOPEN:
-
-# sudo zpool import pool-${CRYPTOVAULTLABEL}
-# sudo zpool scrub pool-${CRYPTOVAULTLABEL}
-# -or-
-# sudo mount /dev/mapper/${CRYPTOVAULTLABEL} ${MOUNTPATH}
-
-# --
-
-# CLOSE:
-
-# zfs:
-# sudo zpool export pool-${CRYPTOVAULTLABEL}
-# ext4:
-# umount ${MOUNTPATH} > /dev/null 2>&1
-
-# sudo cryptsetup luksClose /dev/mapper/${CRYPTOVAULTLABEL}
-
-# DNAM=${CRYPTOVAULTLABEL}; LDEV=`sudo losetup --raw | grep $DNAM | awk '{print $1}'`; sudo losetup -d $LDEV
-
-#TODO: create the mount(unlock) / umount(lock) scripts

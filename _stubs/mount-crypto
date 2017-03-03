@@ -1,136 +1,344 @@
-#!/bin/bash 
-#DEV: the above line must be removed
 
 # ----------------------------------------------------------------------------
 
-# REOPEN:
+# COLOR DEFINITIONS ==========================================================
 
-# sudo zpool import pool-${CRYPTOVAULTLABEL}
-# sudo zpool scrub pool-${CRYPTOVAULTLABEL}
-# -or-
-# sudo mount /dev/mapper/${CRYPTOVAULTLABEL} ${MOUNTPATH}
+# Reset
+Color_Off='\033[0m'       # Text Reset
 
-# set up the loop device
-echo -e "\e${BIWhite}Setting up the loop device...\e${Color_Off}"
-if ! sudo -n true 2>/dev/null; then 
-  echo -e "\e${IYellow}This operation requires you to re-enter your sudo password below:\e${Color_Off}"
-fi
-loopdev=`sudo losetup -f`
-echo "Using loop device: $loopdev"
-executable="losetup $loopdev ${VAULTPATH}/${CRYPTOVAULTLABEL}"
-echo -e "${executing}$elevated: $executable"
-sudoit $executable
-# to confirm/test, pull label with $loopdev, compare to the label
+# Regular Colors
+Black='\033[0;30m'        # Black
+Red='\033[0;31m'          # Red
+Green='\033[0;32m'        # Green
+Yellow='\033[0;33m'       # Yellow
+Blue='\033[0;34m'         # Blue
+Purple='\033[0;35m'       # Purple
+Cyan='\033[0;36m'         # Cyan
+White='\033[0;37m'        # White
 
-echo
+# Bold
+BBlack='\033[1;30m'       # Black
+BRed='\033[1;31m'         # Red
+BGreen='\033[1;32m'       # Green
+BYellow='\033[1;33m'      # Yellow
+BBlue='\033[1;34m'        # Blue
+BPurple='\033[1;35m'      # Purple
+BCyan='\033[1;36m'        # Cyan
+BWhite='\033[1;37m'       # White
 
-# open the mapped loop device (req. selected encryption password)
-echo -e "\e${BIWhite}Opening the mapped device...\e${Color_Off}"
-executable="cryptsetup luksOpen $loopdev ${CRYPTOVAULTLABEL}"
-echo -e "${executing}$elevated: $executable"
-echo -e "\e${IYellow}The encrypted device is being opened. Please enter below the encryption password\nyou selected earlier in the process (NOTE: typed characters will not echo).\e${Color_Off}"
-sudoit $executable
+# Underline
+UBlack='\033[4;30m'       # Black
+URed='\033[4;31m'         # Red
+UGreen='\033[4;32m'       # Green
+UYellow='\033[4;33m'      # Yellow
+UBlue='\033[4;34m'        # Blue
+UPurple='\033[4;35m'      # Purple
+UCyan='\033[4;36m'        # Cyan
+UWhite='\033[4;37m'       # White
 
-echo
+# Background
+On_Black='\033[40m'       # Black
+On_Red='\033[41m'         # Red
+On_Green='\033[42m'       # Green
+On_Yellow='\033[43m'      # Yellow
+On_Blue='\033[44m'        # Blue
+On_Purple='\033[45m'      # Purple
+On_Cyan='\033[46m'        # Cyan
+On_White='\033[47m'       # White
 
-# mounting the filesystem
-echo -e "\e${BIWhite}Mounting the ${CRYPTOFS} filesystem...\e${Color_Off}"
-if [ "$CRYPTOFS" = "zfs" ]; then
-  zpool_id="zpool-${CRYPTOVAULTLABEL}"
-  echo "zpool ID for this cryptodisk is: $zpool_id"
-  executable="zpool import $zpool_id"
-  echo -e "${executing}$elevated: $executable"  
-  sudoit $executable
-  echo "Currently mounted zfs filesystems:"
-  sudoit zfs list
-  echo -e "\e${BIWhite}Scrubbing the mounted filesystem (integrity check)...\e${Color_Off}"
-  executable="zpool scrub $zpool_id"
-  sudoit $executable  
+# High Intensity
+IBlack='\033[0;90m'       # Black
+IRed='\033[0;91m'         # Red
+IGreen='\033[0;92m'       # Green
+IYellow='\033[0;93m'      # Yellow
+IBlue='\033[0;94m'        # Blue
+IPurple='\033[0;95m'      # Purple
+ICyan='\033[0;96m'        # Cyan
+IWhite='\033[0;97m'       # White
+
+# Bold High Intensity
+BIBlack='\033[1;90m'      # Black
+BIRed='\033[1;91m'        # Red
+BIGreen='\033[1;92m'      # Green
+BIYellow='\033[1;93m'     # Yellow
+BIBlue='\033[1;94m'       # Blue
+BIPurple='\033[1;95m'     # Purple
+BICyan='\033[1;96m'       # Cyan
+BIWhite='\033[1;97m'      # White
+
+# High Intensity backgrounds
+On_IBlack='\033[0;100m'   # Black
+On_IRed='\033[0;101m'     # Red
+On_IGreen='\033[0;102m'   # Green
+On_IYellow='\033[0;103m'  # Yellow
+On_IBlue='\033[0;104m'    # Blue
+On_IPurple='\033[0;105m'  # Purple
+On_ICyan='\033[0;106m'    # Cyan
+On_IWhite='\033[0;107m'   # White
+
+
+# DEFAULTS AND CONSTANTS  ====================================================
+
+# who *am* I?
+login_user=$(logname)
+current_user=`whoami`
+
+# am I root?
+if [ "$EUID" -eq 0 ]; then
+  im_root=true
 else
-  executable="mkfs.ext4 /dev/mapper/${CRYPTOVAULTLABEL}"
-  echo -e "${executing}$elevated: $executable"
-  sudoit $executable
-  executable_mount="mount /dev/mapper/${CRYPTOVAULTLABEL} ${MOUNTPATH}"
-  echo "Mounting ext4 filesystem..."
-  echo -e "${executing}$elevated: $executable_mount"
-  sudoit $executable_mount
+  im_root=false
 fi
 
-# test the mount
-mounttest=`mount | grep --color=never "$zpool_id"`
-if [ "${mounttest}" = "" ]; then
-  echo -e "\e${BWhite}\e${On_Red}Could not mount the crypt disk at  \"${MOUNTPATH}\". Unable to proceed.\e${Color_Off}"
-  cleanup
+# Is sudo password required?
+sudo -k
+if ! sudo -n true 2>/dev/null; then 
+  sudo_pwd_req=true
+else
+  sudo_pwd_req=false
 fi
 
-if [ "$mountpath_owner" != "root" ]; then
-  echo
-  echo -e "\e${BIWhite}Setting the mountpoint permissions...\e${Color_Off}"
-  executable="chmod 770 ${MOUNTPATH}"
-  echo -e "${executing}$elevated: $executable"
-  sudoit $executable
-  executable="chown -R ${mountpath_owner} ${MOUNTPATH}"
-  echo -e "${executing}$elevated: $executable"
-  sudoit $executable
+# "EXECUTING" and "ELEVATED" labels
+executing="\e${BGreen}EXECUTING\e${Color_Off}"
+if [ "$im_root" = "0" ]; then
+  elevated=" \e${Black}\e${On_Green}ELEVATED\e${Color_Off}"
+else
+  elevated=''
 fi
 
 
-### LEGACY BEGIN -------------------------------
- 
-if [ ! -f ${CRYPT_DISK_FQFN} ]; then
-  echo "Crypt disk '${CRYPT_DISK_FQFN}' missing. Cannot continue."
-  exit 1
-fi
- 
-if [ ! -d ${CRYPT_MOUNTPOINT} ]; then
-  echo "Mountpoint '${CRYPT_MOUNTPOINT}' missing. Cannot continue."
-  exit 1
-fi
- 
-function check_mounted {
+# FUNCTIONS ==================================================================
+
+# always sudo because executing as a different user
+sudoitas() {
+  sudo_user=$1
+  shift
+  sudo -u $sudo_user "$@"
+}
+
+# check mountpath against mounts in /proc/mounts
+check_mounted {
   if grep -qsE "^[^ ]+ $1" /proc/mounts; then
     _RET=true
   else
     _RET=false
   fi
 }
- 
-check_mounted $CRYPT_MOUNTPOINT
+
+# revert made changes (such as after an partially completed setup)
+cleanup() {
+  echo
+  echo -e "\e${BIRed}Cleaning upt...\e${Color_Off}"  
+
+  check_mounted $MOUNTPOINT
+  if ${_RET} ; then
+    # cryptovault is currently mounted.. start by attempting to unmount
+    
+    # export zfs pool, umount ext4 fs
+    dismounted="false"
+    if [ "$CRYPTOFS" = "zfs" ]; then
+
+      #export zfs
+      while [ "$dismounted" = "false" ]; do
+        sudoit zpool export $zpool_id > /dev/null 2>&1
+        if [ $? -ne 0 ]; then
+          echo "Unable to unmount the crypto vault; the device is busy. Free the device (such as make sure you aren't currently cd'd in the crypto vault, or that you don't have files open from the vault), and try again."
+          echo "The following process(es) hold the mount:"
+          x=(); for a in $(mount | cut -d' ' -f3); do test -e "$a" || x+=("-e$a"); done
+          lsof "${x[@]}" -f -- ${MOUNTPOINT}
+          echo
+          read -p "Press any key to retry unmount! " -n1 -s
+        else
+          dismounted="true"
+        fi
+      done
+      echo "zfs pool exported (file system dismounted) from mountpoint ${MOUNTPOINT}."
+
+    else
+  
+      # unmount ext4
+      while [ "$dismounted" = "false" ]; do
+        sudoit umount ${MOUNTPOINT} > /dev/null 2>&1
+        if [ $? -ne 0 ]; then
+            echo "Unable to unmount the crypto vault; the device is busy. Free the device (such as make sure you aren't currently cd'd in the crypto vault, or that you don't have files open from the vault), and try again."
+            echo "The following process(es) hold the mount:"
+            x=(); for a in $(mount | cut -d' ' -f3); do test -e "$a" || x+=("-e$a"); done
+            lsof "${x[@]}" -f -- ${MOUNTPOINT}
+            echo
+            read -p "Press any key to retry unmount! " -n1 -s
+        else
+          dismounted="true"
+        fi
+      done
+      echo "ext4 filesystem unmounted from mountpoint ${MOUNTPOINT}."
+    
+    fi  
+
+  else
+    # crypto vault is not mounted at this point (perhaps it never was as this is cleanup)
+    dismounted="true"
+
+  fi
+
+  # remove mapped disk
+  if [ -b /dev/mapper/${CRYPTOVAULT_LABEL} ]; then
+    sudo cryptsetup luksClose /dev/mapper/${CRYPTOVAULT_LABEL}
+    echo "Mapped device /dev/mapper/${CRYPTOVAULT_LABEL} removed."
+  fi
+
+  # acquire a free loop device
+  loopdev2del=`sudo losetup --raw | grep ${CRYPTOVAULT_FQFN} | awk '{print $1}'`
+  # delete the assigned loop device
+  if [ "$loopdev2del" != "" ]; then
+    sudo losetup -d $loopdev2del > /dev/null 2>&1
+    echo "Assigned loop device $loopdev2del removed."
+  fi
+  echo
+  echo "Cleanup complete. Exiting."
+  echo
+  exit 1
+}
+
+
+# PREREQS CHECKS =============================================================
+
+CRYPTSETUP=`sudo which cryptsetup`
+if [ $? -ne 0 ]; then
+  printf "\n*********************************************************************************************************\n\
+This script requires cryptsetup. Install it first with 'sudo apt-get install cryptsetup', then try again!\n\
+*********************************************************************************************************\n\n"
+  exit 1
+fi
+
+if [ "$CRYPTOVAULT_FS" = "zfs" ]; then
+  ZFS=`sudo which zfs`
+  if [ $? -ne 0 ]; then
+    printf "\n\n***************************************************************************************************************\n\
+This crypto vault uses the ZFS filesystem; 'zfsutils-linux' package is required but is not currently installed.\n\
+Install it first with 'sudo apt-get install zfsutils-linux', then try again!\
+\n***************************************************************************************************************\n\n\n"
+    exit 1
+  fi
+fi
+
+#TODO: What happens when the dir is absent?
+# Is the crypto vault present 
+if [ ! -f ${CRYPTOVAULT_FQFN} ]; then
+  echo "Cryptovault file '${CRYPTOVAULT_FQFN}' is missing. Cannot continue."
+  exit 1
+fi
+
+# Check for the mount dir
+if [ ! -d ${CRYPTOVAULT_MOUNTPOINT} ]; then
+  echo "Mountpoint directory '${CRYPTOVAULT_MOUNTPOINT}' is missing. Cannot continue."
+  exit 1
+fi
+
+# Make sure the mountpoint is not occupied
+check_mounted $CRYPTOVAULT_MOUNTPOINT
 if ${_RET} ; then
-  echo "Mountpoint '${CRYPT_MOUNTPOINT}' already mounted. Cannot continue."
+  echo "Mountpoint directory '${CRYPTOVAULT_MOUNTPOINT}' already mounted. Cannot continue."
   exit 1
 fi
- 
-losetup ${LOOPBACK_DEVICE} ${CRYPT_DISK_FQFN} > /dev/null 2>&1
- 
-# Capture errors
-if [ $? -ne 0 ]; then
-  echo "ERROR - Loopback device in use."
+
+# Make sure the mountpoint directory is empty
+if [ "$(ls -A $CRYPTOVAULT_MOUNTPOINT)" ]; then
+  echo "Mountpoint directory '${CRYPTOVAULT_MOUNTPOINT}' is not empty. Cannot continue."
   exit 1
-else
-  echo "OK - Loopback device mapped."
 fi
- 
-cryptsetup luksOpen ${LOOPBACK_DEVICE} ${CRYPT_LABEL} > /dev/null 2>&1
- 
-# Capture errors
-if [ $? -ne 0 ]; then
-  echo "ERROR Opening LUKS CryptoFS. Removing the loopback device."
-  losetup -d ${LOOPBACK_DEVICE}
-  exit 1
-else
-  echo "OK - LUKS CryptoFS Opened."
+
+
+# MAIN LOGIC =================================================================
+
+clear
+
+echo
+
+trap cleanup INT ERR
+
+if [ $sudo_pwd_req = "true" ]; then 
+  echo
+  echo -e "\e${IYellow}NOTE: You may be prompted for the sudo password for some operations.\e${Color_Off}"
+  echo
 fi
- 
-mount /dev/mapper/${CRYPT_LABEL} ${CRYPT_MOUNTPOINT} > /dev/null 2>&1
- 
+
+# set up the loop device
+echo -e "\e${BIWhite}Setting up the loop device...\e${Color_Off}"
+loopdev=`sudo losetup -f`
+echo "Using loop device: $loopdev"
+executable="losetup $loopdev ${CRYPTOVAULT_FQFN}"
+echo -e "${executing}$elevated: $executable"
+sudo $executable
+
 # Capture errors
 if [ $? -ne 0 ]; then
-  echo "ERROR mounting CryptoFS."
-  cryptsetup luksClose /dev/mapper/${CRYPT_LABEL}
-  losetup -d ${LOOPBACK_DEVICE}
-  exit 1
+  echo "Unable to map the loop device. Cannot continue."
+  cleanup
 else
-  echo "OK - Mounted CryptoFS."
-  exit 0
+  echo "Loop device mapped successfully."
+fi
+
+
+#TODO: to confirm/test, pull label with $loopdev, compare to CRYPTOVAULT_LABEL
+
+echo
+
+# open the mapped loop device (req. selected encryption password)
+echo -e "\e${BIWhite}Opening the mapped device...\e${Color_Off}"
+executable="cryptsetup luksOpen $loopdev ${CRYPTOVAULT_LABEL}"
+echo -e "${executing}$elevated: $executable"
+echo -e "\e${IYellow}The encrypted device is being opened. Please enter below the encryption password\nselected when the vault was created (NOTE: typed characters will not echo).\e${Color_Off}"
+sudo $executable
+if [ $? -ne 0 ]; then
+  echo "Unable to decrypt the vault. Are you sure you entered the password correctly?"
+  cleanup
+else
+  echo "Vault decrypted."
+fi
+
+echo
+
+# mounting the filesystem
+echo -e "\e${BIWhite}Mounting the ${CRYPTOVAULT_FS} filesystem...\e${Color_Off}"
+if [ "$CRYPTOVAULT_FS" = "zfs" ]; then
+  zpool_id="zpool-${CRYPTOVAULT_LABEL}"
+  echo "zpool ID for this crypto vault is: $zpool_id"
+  executable="zpool import $zpool_id"
+  echo -e "${executing}$elevated: $executable"  
+  sudo $executable
+  echo "Currently mounted zfs filesystems:"
+  sudo zfs list
+  echo -e "\e${BIWhite}Scrubbing the mounted filesystem (integrity check)...\e${Color_Off}"
+  executable="zpool scrub $zpool_id"
+  sudo $executable  
+else
+  executable="mount /dev/mapper/${CRYPTOVAULT_LABEL} ${CRYPTOVAULT_MOUNTPOINT}"
+  echo "Mounting ext4 filesystem..."
+  echo -e "${executing}$elevated: $executable"
+  sudo $executable
+
+  # Capture errors
+  if [ $? -ne 0 ]; then
+    echo "Unable to mount crypt disk. Cannot continue."
+    cleanup
+  fi
+fi
+
+# test the mount
+check_mounted $CRYPTOVAULT_MOUNTPOINT
+if ! ${_RET} ; then
+  echo -e "\e${BWhite}\e${On_Red}Could not mount the crypt disk at  \"${CRYPTOVAULT_MOUNTPOINT}\". Cannot continue.\e${Color_Off}"
+  cleanup
+fi
+
+# TODO: is this needed? Probably not...
+if [ "$mountpath_owner" != "root" ]; then
+  echo
+  echo -e "\e${BIWhite}Setting the mountpoint permissions...\e${Color_Off}"
+  executable="chmod 770 ${CRYPTOVAULT_MOUNTPOINT}"
+  echo -e "${executing}$elevated: $executable"
+  sudo $executable
+  executable="chown -R ${mountpath_owner} ${CRYPTOVAULT_MOUNTPOINT}"
+  echo -e "${executing}$elevated: $executable"
+  sudo $executable
 fi
