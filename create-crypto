@@ -79,6 +79,9 @@ On_IWhite='\033[0;107m'   # White
 
 # DEFAULTS & CONSTANTS =======================================================
 
+# make "false" and "true" immutable
+declare -ir false=0 true=1
+
 # get the "home" of this script, no matter where this is executed from
 SCRIPT_DIR=`dirname "$(readlink -f "$0")"`
 
@@ -155,32 +158,40 @@ get_sudo_pwd() {
 # sudo for system operations
 # use the locally cached sudo password if sudo doesn't cache the password by policy (or if it has expired)
 sudoit() {
+  # $1 is the retval (_ret)
+
   if [ "$im_root" = "false" ]; then
     if sudo -n true 2>/dev/null; then 
-      sudo "$@"
+      sudo "${@:2}" 2>/dev/null
+      _ret=$?
     else
-      echo ${SUDOPWD} | sudo -S "$@"  &> /dev/null
+      echo ${SUDOPWD} | sudo -S "${@:2}" 2>/dev/null
+      _ret=${PIPESTATUS[1]}
     fi
   else
     # running as root, no sudo needed
-    eval "$@"
+    eval "${@:2}" 2>/dev/null
+    _ret=$?
   fi
+
+  eval "$1=$_ret"  
 }
 
 # always sudo because executing as a different user
 # use the locally cached sudo password if sudo doesn't cache the password by policy (or if it has expired)
 sudoitas() {
-  sudo_user=$1
-  shift
+  # $1 is the retval (_ret)
+  # $2 is user to run as sudo (sudo_user)
+  sudo_user=$2
   if sudo -n true 2>/dev/null; then 
-    sudo -u $sudo_user "$@"
+    sudo -u $sudo_user "${@:3}" 2>/dev/null
+    _ret=$?
   else
-    echo ${SUDOPWD} | sudo -S -u $sudo_user "$@"  &> /dev/null
+    echo ${SUDOPWD} | sudo -S -u $sudo_user "${@:3}" 2>/dev/null
+    _ret=${PIPESTATUS[1]}
   fi
-#TODO: return code should sent back to the caller
-# like with something like this:
-# eval "$1=$_ret"
-# .. but can we, with piped commands?
+
+  eval "$1=$_ret"
 }
 
 find_existing_parent() {
@@ -227,15 +238,15 @@ cleanup() {
   check_mounted $MOUNTPOINT
   if ${_RET} ; then
     # cryptovault is currently mounted.. start by attempting to unmount
-    
+
     # export zfs pool, umount ext4 fs
     dismounted="false"
     if [ "$CRYPTOVAULT_FS" = "zfs" ]; then
 
       #export zfs
       while [ "$dismounted" = "false" ]; do
-        sudoit zpool export $zpool_id > /dev/null 2>&1
-        if [ $? -ne 0 ]; then
+        sudoit _ret zpool export $zpool_id > /dev/null 2>&1
+        if [ ${_ret} -ne 0 ]; then
           echo "Unable to unmount the crypto vault; the device is busy. Free the device (such as make sure you aren't currently cd'd in the crypto vault, or that you don't have files open from the vault), and try again."
           echo "The following process(es) hold the mount:"
           x=(); for a in $(mount | cut -d' ' -f3); do test -e "$a" || x+=("-e$a"); done
@@ -252,8 +263,8 @@ cleanup() {
   
       # unmount ext4
       while [ "$dismounted" = "false" ]; do
-        sudoit umount ${MOUNTPOINT} > /dev/null 2>&1
-        if [ $? -ne 0 ]; then
+        sudoit _ret umount ${MOUNTPOINT} > /dev/null 2>&1
+        if [ ${_ret} -ne 0 ]; then
             echo "Unable to unmount the crypto vault; the device is busy. Free the device (such as make sure you aren't currently cd'd in the crypto vault, or that you don't have files open from the vault), and try again."
             echo "The following process(es) hold the mount:"
             x=(); for a in $(mount | cut -d' ' -f3); do test -e "$a" || x+=("-e$a"); done
@@ -276,8 +287,13 @@ cleanup() {
 
   # remove mapped disk if present
   if [ -b /dev/mapper/${CRYPTOVAULT_LABEL} ]; then
-    sudoit cryptsetup luksClose /dev/mapper/${CRYPTOVAULT_LABEL}
-    echo "Mapped device /dev/mapper/${CRYPTOVAULT_LABEL} removed."
+    sudoit _ret cryptsetup luksClose /dev/mapper/${CRYPTOVAULT_LABEL}
+    if [ ${_ret} -ne 0 ]; then
+      echo "Unable to remove the mapped disk \"/dev/mapper/${CRYPTOVAULT_LABEL}\""
+    else
+      echo "Mapped device /dev/mapper/${CRYPTOVAULT_LABEL} removed."    
+    fi
+
   fi
 
   if ! sudo -n true 2>/dev/null; then 
@@ -287,8 +303,12 @@ cleanup() {
   loopdev2del=`sudo losetup --raw | grep ${VAULTFILE_FQFN} | awk '{print $1}'`
   # delete the assigned loop device if present
   if [ "$loopdev2del" != "" ]; then
-    sudoit losetup -d $loopdev2del > /dev/null 2>&1
-    echo "Assigned loop device $loopdev2del removed."
+    sudoit _ret losetup -d $loopdev2del > /dev/null 2>&1
+    if [ ${_ret} -ne 0 ]; then
+      echo "Unable to remove the assigned loop device ${loopdev2del}."
+    else
+      echo "Assigned loop device $loopdev2del removed."
+    fi
   fi
 
 #TODO: Add "nodelete" for a successful setup where user chooses not to leave the vault open
@@ -693,19 +713,27 @@ else
 fi
 
 # create vault path
+vaultpath_creation_error="false"
 if [ "$vaultpath_exists" = "false" ]; then
   echo -e "\e${BIWhite}Creating vault path...\e${Color_Off}"
   executable="mkdir -p $VAULTFILE_HOME"
   if [ "$vaultpath_owner" = "$current_user" ]; then
     echo -e "$executing: $executable"
-    eval $executable
+    eval $executable 2>/dev/null
+    if [ $? -ne 0 ]; then
+      vaultpath_creation_error="true"
+    fi    
   else
     echo -e "${executing}$elevated (as $vaultpath_owner): $executable"
-    sudoitas $vaultpath_owner $executable
+    sudoitas _ret $vaultpath_owner $executable
+    if [ ${_ret} -ne 0 ]; then
+      vaultpath_creation_error="true"
+    fi
   fi
  
-  # test 
-  if [ ! -d "$VAULTFILE_HOME" ]; then
+  # test vaultpath creation
+  if [ "$vaultpath_creation_error" = "true" ] ||
+     [ ! -d "$VAULTFILE_HOME" ]; then
     echo -e "\e${BWhite}\e${On_Red}Could not create vault path \"${VAULTFILE_HOME}\". Unable to proceed.\e${Color_Off}"
     cleanup
   fi
@@ -714,6 +742,7 @@ fi
 echo
 
 # create blank vault container file
+vaultfile_creation_error="false"
 echo -e "\e${BIWhite}Creating blank vault container file...\e${Color_Off}"
 if [ "$VAULTSIZEUNIT" = "GB" ]; then
   let vaultsize=$VAULTSIZEVAL*1024
@@ -723,14 +752,23 @@ fi
 executable="dd if=/dev/zero of=${VAULTFILE_FQFN} bs=1M count=$vaultsize"
 if [ "$vaultpath_owner" = "$current_user" ]; then
   echo -e "$executing: $executable"
-  eval $executable
+  eval $executable 2>/dev/null
+  if [ $? -ne 0 ]; then
+    vaultfile_creation_error="true"
+  fi
+
 else
+
   echo -e "${executing}$elevated (as $vaultpath_owner): $executable"
-  sudoitas $vaultpath_owner $executable
+  sudoitas _ret $vaultpath_owner $executable
+  if [ ${_ret} -ne 0 ]; then
+    vaultfile_creation_error="true"
+  fi
 fi
 
-# test
-if [ ! -f "${VAULTFILE_FQFN}" ]; then
+# test blank vaultfile creation
+if [ "$vaultfile_creation_error" = "true" ] ||
+   [ ! -f "${VAULTFILE_FQFN}" ]; then
   echo -e "\e${BWhite}\e${On_Red}Could not create vault container file \"${VAULTFILE_FQFN}\". Unable to proceed.\e${Color_Off}"
   cleanup
 fi
@@ -738,19 +776,27 @@ fi
 echo
 
 # create mountpoint path
+mountpoint_creation_error="false"
 if [ "$mountpoint_exists" = "false" ]; then
   echo -e "\e${BIWhite}Creating the mountpoint (an empty directory)...\e${Color_Off}"
   executable="mkdir -p $MOUNTPOINT"
   if [ "$mountpath_owner" = "$current_user" ]; then
     echo -e "$executing: $executable"
-    eval $executable
+    eval $executable 2>/dev/null
+    if [ $? -ne 0 ]; then
+      mountpoint_creation_error="true"
+    fi
   else
     echo -e "${executing}$elevated (as $mountpath_owner): $executable"
-    sudoitas $mountpath_owner $executable
+    sudoitas _ret $mountpath_owner $executable
+    if [ ${_ret} -ne 0 ]; then
+      mountpoint_creation_error="true"
+    fi
   fi
   
   # test to make sure mountpath got created
-  if [ ! -d "$MOUNTPOINT" ]; then
+  if [ "$mountpoint_creation_error" = "true" ] ||
+     [ ! -d "$MOUNTPOINT" ]; then
     echo -e "\e${BWhite}\e${On_Red}Could not create the mountpoint at \"${MOUNTPOINT}\". Unable to proceed.\e${Color_Off}"
     cleanup
   fi
@@ -759,6 +805,7 @@ fi
 echo
 
 # format the container
+container_format_error="false"
 echo -e "\e${BIWhite}Formatting the container with encrypted LUKS filesystem...\e${Color_Off}"
 echo -e "${executing}$elevated: cryptsetup luksFormat -q ${VAULTFILE_FQFN}"
 
@@ -769,8 +816,14 @@ if [ "$im_root" = "false" ]; then
   echo -n "$CRYPTPWD" | sudo cryptsetup luksFormat -q ${VAULTFILE_FQFN} -
 else
   # running as root, no sudo needed (even when creting for a different user, this is only access to cryptsetup command)
-  echo -n "$CRYPTPWD" | cryptsetup luksFormat -q ${VAULTFILE_FQFN} -
+  cryptsetup luksFormat -q ${VAULTFILE_FQFN} -
+  if [ $? -ne 0 ]; then
+    container_format_error="true"
+  fi
+
 fi
+
+#TODO: check for format error
 
 echo
 
@@ -779,17 +832,14 @@ echo -e "\e${BIWhite}Setting up the loop device...\e${Color_Off}"
 if ! sudo -n true 2>/dev/null; then 
   echo -e "\e${IYellow}This operation requires you to re-enter your sudo password below:\e${Color_Off}"
 fi
-loopdev=`sudo losetup -f`
+loopdev=$(sudo losetup -f)
 echo "Using loop device: $loopdev"
 executable="losetup $loopdev ${VAULTFILE_FQFN}"
 echo -e "${executing}$elevated: $executable"
-sudoit $executable
-
-#TODO: could sudoit/sudoitas return the error code as 'ret' or something?
-
-DNAM=${CRYPTOVAULT_LABEL}; LDEV=`sudo losetup --raw | grep $DNAM | awk '{print $1}'`;
+sudoit _ret $executable
 
 #TODO: to confirm/test, pull label with $loopdev, compare to CRYPTVAULT_LABEL
+DNAM=${CRYPTOVAULT_LABEL}; LDEV=`sudo losetup --raw | grep $DNAM | awk '{print $1}'`
 
 echo
 
@@ -798,7 +848,7 @@ echo -e "\e${BIWhite}Opening the mapped device...\e${Color_Off}"
 executable="cryptsetup luksOpen $loopdev ${CRYPTOVAULT_LABEL}"
 echo -e "${executing}$elevated: $executable"
 echo -e "\e${IYellow}The encrypted device is being opened. Please enter below the encryption password\nyou selected earlier in the process (NOTE: typed characters will not echo).\e${Color_Off}"
-sudoit $executable
+sudoit _ret $executable
 
 #TODO: Collect errors from luksOpen!
 
@@ -811,17 +861,17 @@ if [ "$CRYPTOVAULT_FS" = "zfs" ]; then
   echo "zpool ID for this crypto vault is: $zpool_id"
   executable="zpool create -o ashift=12 -O atime=off -O compression=lz4 -O normalization=formD -O mountpoint=/ -m ${MOUNTPOINT} $zpool_id /dev/mapper/${CRYPTOVAULT_LABEL}"
   echo -e "${executing}$elevated: $executable"  
-  sudoit $executable
+  sudoit _ret $executable
   echo "Currently mounted zfs filesystems:"
-  sudoit zfs list
+  sudoit _ret zfs list
 else
   executable="mkfs.ext4 /dev/mapper/${CRYPTOVAULT_LABEL}"
   echo -e "${executing}$elevated: $executable"
-  sudoit $executable
+  sudoit _ret $executable
   executable_mount="mount /dev/mapper/${CRYPTOVAULT_LABEL} ${MOUNTPOINT}"
   echo "Mounting ext4 filesystem..."
   echo -e "${executing}$elevated: $executable_mount"
-  sudoit $executable_mount
+  sudoit _ret $executable_mount
 fi
 
 # test the mount
@@ -836,10 +886,10 @@ if [ "$mountpath_owner" != "root" ]; then
   echo -e "\e${BIWhite}Setting the mountpoint permissions...\e${Color_Off}"
   executable="chmod 770 ${MOUNTPOINT}"
   echo -e "${executing}$elevated: $executable"
-  sudoit $executable
+  sudoit _ret $executable
   executable="chown -R ${mountpath_owner} ${MOUNTPOINT}"
   echo -e "${executing}$elevated: $executable"
-  sudoit $executable
+  sudoit _ret $executable
 fi
 
 echo 
