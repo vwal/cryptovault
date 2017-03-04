@@ -223,11 +223,12 @@ find_dir_owner() {
 
 # check mountpath against mounts in /proc/mounts
 check_mounted() {
-  if grep -qsE "^[^ ]+ $1" /proc/mounts; then
-    _RET=true
+  if grep -qsE "^[^ ]+ $2" /proc/mounts; then
+    response="true"
   else
-    _RET=false
+    response="false"
   fi
+  eval "$1=$response"
 }
 
 # revert made changes (such as after an partially completed setup)
@@ -235,8 +236,8 @@ cleanup() {
   echo
   echo -e "\e${BIRed}Cleaning up...\e${Color_Off}"  
 
-  check_mounted $MOUNTPOINT
-  if ${_RET} ; then
+  check_mounted mount_in_proc $MOUNTPOINT
+  if [ "${mount_in_proc}" = "true" ]; then
     # cryptovault is currently mounted.. start by attempting to unmount
 
     # export zfs pool, umount ext4 fs
@@ -805,7 +806,6 @@ fi
 echo
 
 # format the container
-container_format_error="false"
 echo -e "\e${BIWhite}Formatting the container with encrypted LUKS filesystem...\e${Color_Off}"
 echo -e "${executing}$elevated: cryptsetup luksFormat -q ${VAULTFILE_FQFN}"
 
@@ -814,16 +814,18 @@ if [ "$im_root" = "false" ]; then
     echo -e "\e${IYellow}This operation requires you to re-enter your sudo password below:\e${Color_Off}"
   fi
   echo -n "$CRYPTPWD" | sudo cryptsetup luksFormat -q ${VAULTFILE_FQFN} -
+  _ret=${PIPESTATUS[1]}
 else
   # running as root, no sudo needed (even when creting for a different user, this is only access to cryptsetup command)
-  cryptsetup luksFormat -q ${VAULTFILE_FQFN} -
-  if [ $? -ne 0 ]; then
-    container_format_error="true"
-  fi
-
+  echo -n "$CRYPTPWD" | cryptsetup luksFormat -q ${VAULTFILE_FQFN} -
+  _ret=${PIPESTATUS[1]}
 fi
 
-#TODO: check for format error
+# test to make sure container gets formatted
+if [ ${_ret} -ne 0 ]; then
+  echo -e "\e${BWhite}\e${On_Red}Could not format the vault container with LUKS at \"${VAULTFILE_FQFN}\". Unable to proceed.\e${Color_Off}"
+  cleanup
+fi
 
 echo
 
@@ -838,8 +840,13 @@ executable="losetup $loopdev ${VAULTFILE_FQFN}"
 echo -e "${executing}$elevated: $executable"
 sudoit _ret $executable
 
-#TODO: to confirm/test, pull label with $loopdev, compare to CRYPTVAULT_LABEL
-DNAM=${CRYPTOVAULT_LABEL}; LDEV=`sudo losetup --raw | grep $DNAM | awk '{print $1}'`
+# make sure the loop device got set up
+loopdev_by_label=$(sudo losetup --raw | grep ${CRYPTOVAULT_LABEL} | awk '{print $1}')
+if [ ${_ret} -ne 0 ] ||
+   [ "$loopdev_by_label" != "$loopdev" ]; then
+  echo -e "\e${BWhite}\e${On_Red}Could not set up the loop device. Unable to proceed.\e${Color_Off}"
+  cleanup
+fi
 
 echo
 
@@ -850,7 +857,10 @@ echo -e "${executing}$elevated: $executable"
 echo -e "\e${IYellow}The encrypted device is being opened. Please enter below the encryption password\nyou selected earlier in the process (NOTE: typed characters will not echo).\e${Color_Off}"
 sudoit _ret $executable
 
-#TODO: Collect errors from luksOpen!
+if [ ${_ret} -ne 0 ]; then
+  echo -e "\e${BWhite}\e${On_Red}Could not open the loop device (are you sure you entered the decryption password correctly?). Unable to proceed.\e${Color_Off}"
+  cleanup
+fi
 
 echo
 
@@ -875,8 +885,9 @@ else
 fi
 
 # test the mount
-check_mounted $MOUNTPOINT
-if ! ${_RET} ; then
+check_mounted mount_in_proc $MOUNTPOINT
+if [ "$mount_in_proc" = "false" ] ||
+   [ ${_ret} -ne 0 ]; then
   echo -e "\e${BWhite}\e${On_Red}Could not mount the crypto vault at  \"${MOUNTPOINT}\". Unable to proceed.\e${Color_Off}"
   cleanup
 fi
