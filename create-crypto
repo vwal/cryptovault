@@ -1,6 +1,6 @@
 #!/bin/bash
 
-trap early_exit INT ERR
+trap early_exit INT TERM
 
 # COLOR DEFINITIONS ==========================================================
 
@@ -330,7 +330,7 @@ cleanup() {
     exit_info
     
   else
-    # we're here either via trapped INT or ERR, or because of user-selected cancellation
+    # we're here either via trapped INT or TERM, or because of user-selected cancellation
     
     # remove vault file
     if [ -f $VAULTFILE_FQFN ]; then
@@ -778,8 +778,8 @@ clear
 
 echo
 
-trap - INT ERR
-trap cleanup INT ERR
+trap - INT TERM
+trap cleanup INT TERM
 
 executing="\e${BGreen}EXECUTING\e${Color_Off}"
 if [ "$im_root" = "false" ]; then
@@ -1047,20 +1047,32 @@ echo
 
 # MAIN LOGIC: PROCESS COMPLETED; WRAPPING UP =================================
 
-# deactivate 'cleanup' trap (INT)
-trap - INT ERR
-# activate 'cleanup nodelete' trap (INT)
-trap 'echo && echo "Closing the crypto vault." && cleanup nodelete' INT
+# confirm to keep the vault (option to fully bail out)
+echo -n "Crypto vault \"${CRYPTOVAULT_LABEL}\" has been created. Keep this new vault (y/n)? "
+old_stty_cfg=$(stty -g)
+stty raw -echo
+answer=$( while ! head -c 1 | grep -i '[yn]' ;do true ;done )
+stty $old_stty_cfg
+if echo "$answer" | grep -iq "^n" ; then
+  echo
+  echo "Abandoning the created crypt disk."
+  cleanup
+else
 
-read -p "Crypto vault \"${CRYPTOVAULT_LABEL}\" has been created; press any key to continue... " -n1 -s
+  # deactivate 'cleanup' trap (INT TERM)
+  trap - INT TERM
+  # activate 'cleanup nodelete' trap (INT TERM)
+  trap 'echo && echo "Closing the crypto vault." && cleanup nodelete' INT TERM
 
-dialog --title "Lock/unmount the new crypto vault?" --yesno "\nDo you want to leave the newly created crypto vault mounted and unlocked at \"${MOUNTPOINT}\"?\n\n
+  dialog --title "Lock/unmount the new crypto vault?" --yesno "\nDo you want to leave the newly created crypto vault mounted and unlocked at \"${MOUNTPOINT}\"?\n\n
 You can unmount/lock and remount/unlock the crypto vault at any time using the \"mount-${CRYPTOVAULT_LABEL}\" and \"umount-${CRYPTOVAULT_LABEL}\" scripts which have been created at \"${CRYPTOVAULT_COMMANDDIR}\"." 20 70
-_ret=$?
+  _ret=$?
   
-case ${_ret} in
-  0)
-    clear && echo && echo "Leaving the crypto vault open at ${MOUNTPOINT}" && exit_info;;
-  1)
-    clear && echo && echo "Closing the crypto vault." && cleanup nodelete;;
-esac
+  case ${_ret} in
+    0)
+      clear && echo && echo "Leaving the crypto vault open at ${MOUNTPOINT}" && exit_info;;
+    1)
+      clear && echo && echo "Closing the crypto vault." && cleanup nodelete;;
+  esac
+
+fi
