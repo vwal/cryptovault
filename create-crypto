@@ -1,6 +1,5 @@
 #!/bin/bash
 
-
 # COLOR DEFINITIONS ==========================================================
 
 # Reset
@@ -248,10 +247,16 @@ cleanup() {
       while [ "$dismounted" = "false" ]; do
         sudoit _ret zpool export $zpool_id > /dev/null 2>&1
         if [ ${_ret} -ne 0 ]; then
+          if ! sudo -n true 2>/dev/null; then 
+            echo -e "\e${IYellow}This operation may require you to re-enter your sudo password below:\e${Color_Off}"
+          fi 
           echo "Unable to unmount the crypto vault; the device is busy. Free the device (such as make sure you aren't currently cd'd in the crypto vault, or that you don't have files open from the vault), and try again."
+          if ! sudo -n true 2>/dev/null; then 
+            echo -e "\e${IYellow}This operation requires you to re-enter your sudo password below:\e${Color_Off}"
+          fi 
           echo "The following process(es) hold the mount:"
           x=(); for a in $(mount | cut -d' ' -f3); do test -e "$a" || x+=("-e$a"); done
-          lsof "${x[@]}" -f -- ${MOUNTPOINT}
+          sudo lsof "${x[@]}" -f -- ${MOUNTPOINT}
           echo
           read -p "Press any key to retry unmount! " -n1 -s
         else
@@ -298,7 +303,7 @@ cleanup() {
   fi
 
   if ! sudo -n true 2>/dev/null; then 
-    echo -e "\e${IYellow}This operation requires you to re-enter your sudo password below:\e${Color_Off}"
+    echo -e "\e${IYellow}This operation may require you to re-enter your sudo password below:\e${Color_Off}"
   fi 
   # acquire a free loop device
   loopdev2del=$(sudo losetup --raw | grep ${VAULTFILE_FQFN} | awk '{print $1}')
@@ -312,21 +317,76 @@ cleanup() {
     fi
   fi
 
-#TODO: Add "nodelete" for a successful setup where user chooses not to leave the vault open
-  if [ -d $CRYPTOVAULT_COMMANDDIR ]; then
-    rm -rf $CRYPTOVAULT_COMMANDDIR
-    echo "Generated command files removed."
+  if [ "$1" = "nodelete" ]; then
+
+    echo
+    echo "Cleanup complete."
+    exit_info
+    
+  else
+    # we're here either via trapped INT or ERR, or because of user-selected cancellation
+    
+    # remove vault file
+    if [ -f $VAULTFILE_FQFN ]; then
+      
+      #TODO: is sudo required?
+      
+      rm -f $VAULTFILE_FQFN
+      echo "Vaultfile removed."
+    fi
+
+    # remove vault directory
+    if [ -d $VAULTFILE_HOME ] &&
+       [ "$vaultpath_exists" = "false" ] &&
+       [ ! "$(ls -A $VAULTFILE_HOME)" ]; then
+      
+      #TODO: is sudo required?
+      
+      rmdir $VAULTFILE_HOME
+      echo "Vault directory removed (it was created during this process, and was now empty)."       
+    else
+      echo "Vault directory was not created by this process. Leaving it intact."
+    fi
+
+    if [ -d $MOUNTPOINT ] &&
+       [ "$mountpoint_exists" = "false" ] &&
+       [ ! "$(ls -A $MOUNTPOINT)" ]; then
+      
+      #TODO: is sudo required?
+      
+      rmdir $MOUNTPOINT
+      echo "Mountpoint directory removed (it was created during this process, and was empty)."       
+    else
+      echo "Mountpoint directory was not created by this process. Leaving it intact."
+    fi
+
+    if [ -d $CRYPTOVAULT_COMMANDDIR ]; then
+
+      #TODO: is sudo required?
+
+      rm -rf $CRYPTOVAULT_COMMANDDIR
+      echo "Generated command files removed."
+    fi
+
+    echo
+    echo "Cleanup complete. Exiting."
+    echo
+
+    exit 1
+
   fi
+  
+}
 
-# when no "nodelete":
-#TODO: delete the vault file (i.e. VAULTFILE_FQFN) if present
-#TODO: delete the vault dir [only the last part] (if it was created, i.e. vaultpath_exists="false", and if it's empty now)
-#TODO: delete the mount point dir (if it was created, i.e. mountpoint_exists="false", and if it's empty)
+exit_info() {
+  # clean exit
+  
+  echo
+  echo "Please use the \"mount-${CRYPTOVAULT_LABEL}\" and \"umount-${CRYPTOVAULT_LABEL}\" command files at ${CRYPTOVAULT_COMMANDDIR} to mount and dismount your newly created crypto vault \"${CRYPTOVAULT_LABEL}\"."
+  echo
+  
+  exit 0
 
-  echo
-  echo "Cleanup complete. Exiting."
-  echo
-  exit 1
 }
 
 # PREREQS CHECKS =============================================================
@@ -811,7 +871,7 @@ echo -e "${executing}$elevated: cryptsetup luksFormat -q ${VAULTFILE_FQFN}"
 
 if [ "$im_root" = "false" ]; then
   if ! sudo -n true 2>/dev/null; then 
-    echo -e "\e${IYellow}This operation requires you to re-enter your sudo password below:\e${Color_Off}"
+    echo -e "\e${IYellow}This operation may require you to re-enter your sudo password below:\e${Color_Off}"
   fi
   echo -n "$CRYPTPWD" | sudo cryptsetup luksFormat -q ${VAULTFILE_FQFN} -
   _ret=${PIPESTATUS[1]}
@@ -832,7 +892,7 @@ echo
 # set up the loop device
 echo -e "\e${BIWhite}Setting up the loop device...\e${Color_Off}"
 if ! sudo -n true 2>/dev/null; then 
-  echo -e "\e${IYellow}This operation requires you to re-enter your sudo password below:\e${Color_Off}"
+  echo -e "\e${IYellow}This operation may require you to re-enter your sudo password below:\e${Color_Off}"
 fi
 loopdev=$(sudo losetup -f)
 echo "Using loop device: $loopdev"
@@ -920,10 +980,12 @@ fi
 #      mountpath_owner_home=$( getent passwd ${mountpath_owner} | cut -d: -f6 )
 #      Or perhaps inquire the user where they want these placed (and made executable to)?
 
-#TODO: with `cat` the vars get evaluated.. must either cat as-is, or find a different way
+echo -e "\e${BIWhite}Generating command scripts...\e${Color_Off}"
 
 CRYPTOVAULT_COMMANDDIR=$HOME/${CRYPTOVAULT_LABEL}-commands
 mkdir $CRYPTOVAULT_COMMANDDIR
+
+#TODO: File operation error checks
 
 cp ${SCRIPT_DIR}/_stubs/mount-crypto ${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}
 cp ${SCRIPT_DIR}/_stubs/umount-crypto ${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL}
@@ -946,12 +1008,14 @@ CRYPTOVAULT_MOUNTPOINT=${MOUNTPOINT}
 CRYPTOVAULT_LABEL=${CRYPTOVAULT_LABEL}\n" | cat - "${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}" | sponge "${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}"
 
 fi
+echo "Crypto vault mount script created at ${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}"
 
 echo -e "#!/bin/bash\n
 CRYPTO_FQFN=${VAULTFILE_FQFN}
 CRYPTO_MOUNTPOINT=${MOUNTPOINT}
 CRYPTO_LABEL=${CRYPTOVAULT_LABEL}
 ZPOOL_ID=${zpool_id}\n" | cat - "${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL}" | sponge "${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL}"
+echo "Crypto vault umount script created at ${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL}"
 
 echo -e "#!/bin/bash\n
 CRYPTOVAULT_FS=${CRYPTOVAULT_FS}
@@ -959,21 +1023,29 @@ CRYPTO_FQFN=${VAULTFILE_FQFN}
 CRYPTO_MOUNTPOINT=${MOUNTPOINT}
 CRYPTO_LABEL=${CRYPTOVAULT_LABEL}
 ZPOOL_ID=${zpool_id}\n" | cat - "${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL}" | sponge "${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL}"
+echo "Crypto vault utility script created at ${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL}"
+
+echo
 
 #TODO: set ownership & make executable for the commanddir & the commands (above)
 
 
 # MAIN LOGIC: PROCESS COMPLETED; WRAPPING UP =================================
 
-read -p "Crypto vault has been created; press any key to continue... " -n1 -s
+# deactivate 'cleanup' trap (INT)
+trap - INT ERR
+# activate 'cleanup nodelete' trap (INT)
+trap 'echo && echo "Closing the crypto vault." && cleanup nodelete' INT
+
+read -p "Crypto vault \"${CRYPTOVAULT_LABEL}\" has been created; press any key to continue... " -n1 -s
 
 dialog --title "Lock/unmount the new crypto vault?" --yesno "\nDo you want to leave the newly created crypto vault mounted and unlocked at \"${MOUNTPOINT}\"?\n\n
-You can unmount/lock and remount/unlock the crypto vault at any time using the \"mount-${CRYPTOVAULT_LABEL}\" and \"umount-${CRYPTOVAULT_LABEL}\" scripts that have been created in the same directory with this \"create-crypto\" script." 20 70
-ret=$?
+You can unmount/lock and remount/unlock the crypto vault at any time using the \"mount-${CRYPTOVAULT_LABEL}\" and \"umount-${CRYPTOVAULT_LABEL}\" scripts which have been created at \"${CRYPTOVAULT_COMMANDDIR}\"." 20 70
+_ret=$?
   
-case $ret in
+case ${_ret} in
   0)
-    clear && echo && echo "Leaving the crypto vault open at ${MOUNTPOINT}" && echo;;
+    clear && echo && echo "Leaving the crypto vault open at ${MOUNTPOINT}" && exit_info;;
   1)
-    clear && echo && echo "Closing the crypto vault." && cleanup;;
+    clear && echo && echo "Closing the crypto vault." && cleanup nodelete;;
 esac
