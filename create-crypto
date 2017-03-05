@@ -1,5 +1,7 @@
 #!/bin/bash
 
+trap early_exit INT ERR
+
 # COLOR DEFINITIONS ==========================================================
 
 # Reset
@@ -249,11 +251,10 @@ cleanup() {
         if [ ${_ret} -ne 0 ]; then
           if ! sudo -n true 2>/dev/null; then 
             echo -e "\e${IYellow}This operation may require you to re-enter your sudo password below:\e${Color_Off}"
+            echo
           fi 
           echo "Unable to unmount the crypto vault; the device is busy. Free the device (such as make sure you aren't currently cd'd in the crypto vault, or that you don't have files open from the vault), and try again."
-          if ! sudo -n true 2>/dev/null; then 
-            echo -e "\e${IYellow}This operation requires you to re-enter your sudo password below:\e${Color_Off}"
-          fi 
+          echo
           echo "The following process(es) hold the mount:"
           x=(); for a in $(mount | cut -d' ' -f3); do test -e "$a" || x+=("-e$a"); done
           sudo lsof "${x[@]}" -f -- ${MOUNTPOINT}
@@ -271,12 +272,17 @@ cleanup() {
       while [ "$dismounted" = "false" ]; do
         sudoit _ret umount ${MOUNTPOINT} > /dev/null 2>&1
         if [ ${_ret} -ne 0 ]; then
-            echo "Unable to unmount the crypto vault; the device is busy. Free the device (such as make sure you aren't currently cd'd in the crypto vault, or that you don't have files open from the vault), and try again."
-            echo "The following process(es) hold the mount:"
-            x=(); for a in $(mount | cut -d' ' -f3); do test -e "$a" || x+=("-e$a"); done
-            lsof "${x[@]}" -f -- ${MOUNTPOINT}
+          if ! sudo -n true 2>/dev/null; then 
+            echo -e "\e${IYellow}This operation may require you to re-enter your sudo password below:\e${Color_Off}"
             echo
-            read -p "Press any key to retry unmount! " -n1 -s
+          fi 
+          echo "Unable to unmount the crypto vault; the device is busy. Free the device (such as make sure you aren't currently cd'd in the crypto vault, or that you don't have files open from the vault), and try again."
+          echo
+          echo "The following process(es) hold the mount:"
+          x=(); for a in $(mount | cut -d' ' -f3); do test -e "$a" || x+=("-e$a"); done
+          sudo lsof "${x[@]}" -f -- ${MOUNTPOINT}
+          echo
+          read -p "Press any key to retry unmount! " -n1 -s
         else
           dismounted="true"
         fi
@@ -386,7 +392,15 @@ exit_info() {
   echo
   
   exit 0
+}
 
+early_exit() {
+  # exit before the action begins
+  
+  clear
+  echo
+  echo "Crypto disk creation cancelled."
+  echo
 }
 
 # PREREQS CHECKS =============================================================
@@ -764,6 +778,7 @@ clear
 
 echo
 
+trap - INT ERR
 trap cleanup INT ERR
 
 executing="\e${BGreen}EXECUTING\e${Color_Off}"
