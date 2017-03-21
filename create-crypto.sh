@@ -338,26 +338,41 @@ cleanup() {
   else
     # we're here either via trapped INT or TERM, or because of user-selected cancellation
     
-    # remove vault file 
-    if [ -f $VAULTFILE_FQFN ]; then
+    # remove the vault file 
+    if [ -f $VAULTFILE_FQFN  ]; then
       
-      #TODO: is sudo required? Even for the test above?
-      # use vault_fileop_sudoreq
-      
-      rm -f $VAULTFILE_FQFN
-      echo "Vaultfile removed."
+      if [ "$vault_fileop_sudoreq" = "false" ]; then
+        rm -f "$VAULTFILE_FQFN"
+        _ret = $?
+      else
+        sudoit _ret rm -f "$VAULTFILE_FQFN"      
+      fi
+
+      if [ ${_ret} -ne 0 ]; then
+        echo "Unable to remove the vault file \"$VAULTFILE_FQFN\"."
+      else
+        echo "Vault file \"$CRYPTOVAULT_LABEL\" removed."
+      fi
     fi
 
-    # remove vault directory
+    # remove the vault directory
     if [ -d $VAULTFILE_HOME ] &&
        [ "$vaultpath_exists" = "false" ] &&
        [ ! "$(ls -A $VAULTFILE_HOME)" ]; then
-      
-      #TODO: is sudo required? Even for the tests above?
-      # use vault_fileop_sudoreq
-      
-      rmdir $VAULTFILE_HOME
-      echo "Vault directory removed (it was created during this process, and was now empty)."       
+     
+      if [ "$vault_fileop_sudoreq" = "false" ]; then
+        rmdir "$VAULTFILE_HOME"
+        _ret = $?
+      else
+        sudoit _ret rmdir "$VAULTFILE_HOME"      
+      fi
+
+      if [ ${_ret} -ne 0 ]; then
+        echo "Unable to remove the vault directory \"$VAULTFILE_HOME\"."
+      else
+        echo "Vault directory \"$VAULTFILE_HOME\" removed (it was created during this process, and was now empty)."
+      fi
+     
     else
       echo "Vault directory was not created by this process. Leaving it intact."
     fi
@@ -366,11 +381,19 @@ cleanup() {
        [ "$mountpoint_exists" = "false" ] &&
        [ ! "$(ls -A $MOUNTPOINT)" ]; then
       
-      #TODO: is sudo required? Even for the tests above?
-      # use mount_fileop_sudoreq
-      
-      rmdir $MOUNTPOINT
-      echo "Mountpoint directory removed (it was created during this process, and was empty)."       
+      if [ "$vault_fileop_sudoreq" = "false" ]; then
+        rmdir "$MOUNTPOINT"
+        _ret = $?
+      else
+        sudoit _ret rmdir "$MOUNTPOINT"      
+      fi
+
+      if [ ${_ret} -ne 0 ]; then
+        echo "Unable to remove the mountpoint directory \"$MOUNTPOINT\"."
+      else
+        echo "Mountpoint directory \"$MOUNTPOINT\" removed (it was created during this process, and was empty)."
+      fi      
+
     else
       echo "Mountpoint directory was not created by this process. Leaving it intact."
     fi
