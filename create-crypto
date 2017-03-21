@@ -91,14 +91,18 @@ sudo -k
 is_sudo=0
 SUDOPWD=
 
+# assume either root executionm, or creating vault for oneself
+vault_fileop_sudoreq="false"
+mount_fileop_sudoreq="false"
+
 # who *am* I?
 login_user=$(logname)
 current_user=$(whoami)
 # am I root??
 if [ "$EUID" -eq 0 ]; then
-  im_root=true
+  im_root="true"
 else
-  im_root=false
+  im_root="false"
 fi
 
 CRYPTPWD=
@@ -195,6 +199,7 @@ sudoitas() {
   eval "$1=$_ret"
 }
 
+# find the first existing parent of the given dir
 find_existing_parent() {
   pathname="$2"
 
@@ -217,6 +222,7 @@ find_existing_parent() {
   fi
 }
 
+# who owns the given dir
 find_dir_owner() {
   dirowner=$(ls -ld $2 | awk '{print $3}')
   eval "$1=$dirowner"
@@ -332,10 +338,11 @@ cleanup() {
   else
     # we're here either via trapped INT or TERM, or because of user-selected cancellation
     
-    # remove vault file
+    # remove vault file 
     if [ -f $VAULTFILE_FQFN ]; then
       
-      #TODO: is sudo required?
+      #TODO: is sudo required? Even for the test above?
+      # use vault_fileop_sudoreq
       
       rm -f $VAULTFILE_FQFN
       echo "Vaultfile removed."
@@ -346,7 +353,8 @@ cleanup() {
        [ "$vaultpath_exists" = "false" ] &&
        [ ! "$(ls -A $VAULTFILE_HOME)" ]; then
       
-      #TODO: is sudo required?
+      #TODO: is sudo required? Even for the tests above?
+      # use vault_fileop_sudoreq
       
       rmdir $VAULTFILE_HOME
       echo "Vault directory removed (it was created during this process, and was now empty)."       
@@ -358,7 +366,8 @@ cleanup() {
        [ "$mountpoint_exists" = "false" ] &&
        [ ! "$(ls -A $MOUNTPOINT)" ]; then
       
-      #TODO: is sudo required?
+      #TODO: is sudo required? Even for the tests above?
+      # use mount_fileop_sudoreq
       
       rmdir $MOUNTPOINT
       echo "Mountpoint directory removed (it was created during this process, and was empty)."       
@@ -368,7 +377,8 @@ cleanup() {
 
     if [ -d $CRYPTOVAULT_COMMANDDIR ]; then
 
-      #TODO: is sudo required?
+      #TODO: is sudo required? Even for the test above?
+      # use, probably, mount_fileop_sudoreq (although there may be further detail for this: mount_owner's home, SCRIPTHOME...)
 
       rm -rf $CRYPTOVAULT_COMMANDDIR
       echo "Generated command files removed."
@@ -384,9 +394,18 @@ cleanup() {
   
 }
 
-exit_info() {
-  # clean exit
+# exit before the action begins
+early_exit() {
+  clear
+  echo
+  echo "Crypto disk creation cancelled."
+  echo
   
+  exit 1
+}
+
+# clean exit
+exit_info() {
   echo
   echo "Please use the \"mount-${CRYPTOVAULT_LABEL}\" and \"umount-${CRYPTOVAULT_LABEL}\" command files at ${CRYPTOVAULT_COMMANDDIR} to mount and dismount your newly created crypto vault \"${CRYPTOVAULT_LABEL}\"."
   echo
@@ -394,14 +413,7 @@ exit_info() {
   exit 0
 }
 
-early_exit() {
-  # exit before the action begins
-  
-  clear
-  echo
-  echo "Crypto disk creation cancelled."
-  echo
-}
+
 
 # PREREQS CHECKS =============================================================
 
@@ -417,7 +429,7 @@ if [ "$EUID" -ne 0 ]; then
     get_sudo_pwd
   fi
 else
-  im_root=true  
+  im_root="true"
 fi
 
 CRYPTSETUP=$(sudo which cryptsetup)
@@ -577,8 +589,18 @@ ${vaulthome_example}" 25 75
     fi
   fi
 
+  # since the target vault location is different from the current user, 
+  # if this is not executed as root, sudo is required for the related filesystem operations
+  if [ "$current_user" != "$vaultpath_owner" ] &&
+     [ "$im_root" = "false" ]; then
+    vault_fileop_sudoreq="true"
+  else
+    vault_fileop_sudoreq="false"
+  fi
+
   path_creation_info=""
   vaultpath_exists="true"
+  
   if [ ! -d "$VAULTFILE_HOME" ]; then
     path_creation_info="This directory does not exist; it will be created."
     vaultpath_exists="false"
@@ -708,6 +730,15 @@ ${mountpoint_example}" 27 75
   different_owners_WARNING=""
   if [ "$vaultpath_owner" != "$mountpath_owner" ]; then
     different_owners_WARNING="WARNING: THE VAULT FILE PATH ($VAULTFILE_HOME), AND THE MOUNTPOINT PATH ($MOUNTPOINT) ARE OWNED BY DIFFERENT USERS (\"$vaultpath_owner\" and \"$mountpath_owner\", respectively). I can proceed, but this is *probably* not what you want!\n\n"
+  fi
+
+  # since the target mountpoint location is different from the current user, 
+  # if this is not executed as root, sudo is required for the related filesystem operations
+  if [ "$current_user" != "$mountpath_owner" ] &&
+     [ "$im_root" = "false" ]; then
+    mount_fileop_sudoreq="true"
+  else
+    mount_fileop_sudoreq="false"
   fi
 
   mountpoint_info=""
@@ -1005,6 +1036,8 @@ mkdir $CRYPTOVAULT_COMMANDDIR
 cp ${SCRIPT_DIR}/_stubs/mount-crypto ${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}
 cp ${SCRIPT_DIR}/_stubs/umount-crypto ${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL}
 cp ${SCRIPT_DIR}/_stubs/util-crypto ${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL}
+
+#TODO: Use a tempfile instead of 'sponge'? (It's not a system command but provided by 'moreutils' package)
 
 if [ "$CRYPTOVAULT_FS" = "zfs" ]; then
   echo -e "#!/bin/bash\n
