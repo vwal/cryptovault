@@ -644,7 +644,7 @@ NOTE: Since the crypto vaults are mapped through /dev/mapper system-wide (even w
 
     vaultname_conflict="false"
     mapper_conflict="false"
-    for i in /dev/mapper/*; do  # close fake comment for octodroid viewing */
+    for i in /dev/mapper/*; do
       thisbase=$(basename $i)
       if [ "$thisbase" = "$CRYPTOVAULT_LABEL" ]; then
         vaultname_conflict="true"
