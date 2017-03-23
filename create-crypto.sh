@@ -88,10 +88,15 @@ SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 
 # purge sudo password cache (if set previously), and reset other sudo related variables
 sudo -k
-is_sudo=0
 SUDOPWD=
+# check if the user is allowed to execute sudo without a password
+if sudo -n true 2>/dev/null; then
+  is_sudo=1
+else
+  is_sudo=0
+fi
 
-# assume either root executionm, or creating vault for oneself
+# assume either root execution, or creating vault for oneself
 vault_fileop_sudoreq="false"
 mount_fileop_sudoreq="false"
 
@@ -343,7 +348,7 @@ cleanup() {
       
       if [ "$vault_fileop_sudoreq" = "false" ]; then
         rm -f "$VAULTFILE_FQFN"
-        _ret = $?
+        _ret=$?
       else
         sudoit _ret rm -f "$VAULTFILE_FQFN"      
       fi
@@ -362,7 +367,7 @@ cleanup() {
      
       if [ "$vault_fileop_sudoreq" = "false" ]; then
         rmdir "$VAULTFILE_HOME"
-        _ret = $?
+        _ret=$?
       else
         sudoit _ret rmdir "$VAULTFILE_HOME"      
       fi
@@ -383,7 +388,7 @@ cleanup() {
       
       if [ "$vault_fileop_sudoreq" = "false" ]; then
         rmdir "$MOUNTPOINT"
-        _ret = $?
+        _ret=$?
       else
         sudoit _ret rmdir "$MOUNTPOINT"      
       fi
