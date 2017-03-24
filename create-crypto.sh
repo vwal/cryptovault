@@ -1,6 +1,6 @@
 #!/bin/bash
 
-trap early_exit INT TERM
+trap "early_exit" INT TERM
 
 # COLOR DEFINITIONS ==========================================================
 
@@ -246,6 +246,9 @@ check_mounted() {
 # revert made changes (such as after an partially completed setup)
 cleanup() {
   echo
+  if [ "$1" = "interrupt" ]; then
+    echo -e "\e${Black}\e${On_Red}SCRIPT INTERRUPTED\e${Color_Off}"  
+  fi
   echo -e "\e${BIRed}Cleaning up...\e${Color_Off}"  
 
   check_mounted mount_in_proc $MOUNTPOINT
@@ -338,8 +341,8 @@ cleanup() {
 
     echo
     echo "Cleanup complete."
-    exit_info
-    
+    exit_info  # exits with status 0
+        
   else
     # we're here either via trapped INT or TERM, or because of user-selected cancellation
     
@@ -358,10 +361,14 @@ cleanup() {
       else
         echo "Vault file \"$CRYPTOVAULT_LABEL\" removed."
       fi
+    else
+      echo "There was no vault file to remove."
     fi
 
     # remove the vault directory
-    if [ -d $VAULTFILE_HOME ] &&
+    if [ ! -d $VAULTFILE_HOME ]; then
+      echo "There was no vault directory to remove."
+    elif [ -d $VAULTFILE_HOME ] &&
        [ "$vaultpath_exists" = "false" ] &&
        [ ! "$(ls -A $VAULTFILE_HOME)" ]; then
      
@@ -382,7 +389,9 @@ cleanup() {
       echo "Vault directory was not created by this process. Leaving it intact."
     fi
 
-    if [ -d $MOUNTPOINT ] &&
+    if  [ ! -d $MOUNTPOINT ]; then
+      echo "There was no mountpoint directory to remove."
+    elif [ -d $MOUNTPOINT ] &&
        [ "$mountpoint_exists" = "false" ] &&
        [ ! "$(ls -A $MOUNTPOINT)" ]; then
       
@@ -403,7 +412,10 @@ cleanup() {
       echo "Mountpoint directory was not created by this process. Leaving it intact."
     fi
 
-    if [ -d $CRYPTOVAULT_COMMANDDIR ]; then
+    if [ ! -d $CRYPTOVAULT_COMMANDDIR ]; then
+      echo "There were no command files to remove."
+            
+    elif [ -d $CRYPTOVAULT_COMMANDDIR ]; then
 
       #TODO: is sudo required? Even for the test above?
       # use, probably, mount_fileop_sudoreq (although there may be further detail for this: mount_owner's home, SCRIPTHOME...)
@@ -449,6 +461,10 @@ if ! exists dialog ; then
   printf "\n*************************************************************************************************\n\
 This script requires dialog. Install it first with 'sudo apt-get install dialog', then try again!\n\
 *************************************************************************************************\n\n"
+  
+#TODO: Offer install dialog, proceed if user chooses to do so, and if installation is successful.
+#      Must use sudo. Must support at least yum and apt.
+
   exit 1
 fi
 
@@ -465,6 +481,10 @@ if [ $? -ne 0 ]; then
   printf "\n*********************************************************************************************************\n\
 This script requires cryptsetup. Install it first with 'sudo apt-get install cryptsetup', then try again!\n\
 *********************************************************************************************************\n\n"
+
+#TODO: Offer install cryptsetup, proceed if user chooses to do so, and if installation is successful.
+#      Must use sudo. Must support at least yum and apt.
+
   exit 1
 fi
 
@@ -495,6 +515,10 @@ if [ "$SELECT_CRYPTO_FS" = "1" ]; then
     printf "\n\n**************************************************************************************************************************************\n\
 To use ZFS filesystem zfsutils-linux package is required. Install it first with 'sudo apt-get install zfsutils-linux', then try again!\
 \n**************************************************************************************************************************************\n\n\n"
+
+#TODO: Offer install zfsutils-linux, proceed if user chooses to do so, and if installation is successful.
+#      Must use sudo. Must support at least yum and apt.
+
     exit 1
   fi
 
@@ -838,7 +862,7 @@ clear
 echo
 
 trap - INT TERM
-trap cleanup INT TERM
+trap 'cleanup interrupt' INT TERM
 
 executing="\e${BGreen}EXECUTING\e${Color_Off}"
 if [ "$im_root" = "false" ]; then
@@ -1066,6 +1090,7 @@ cp ${SCRIPT_DIR}/_stubs/umount-crypto ${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOV
 cp ${SCRIPT_DIR}/_stubs/util-crypto ${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL}
 
 #TODO: Use a tempfile instead of 'sponge'? (It's not a system command but provided by 'moreutils' package)
+#      NOTE: 'moreutils' is not currently checked in precheck, so it will potentially fail!
 
 if [ "$CRYPTOVAULT_FS" = "zfs" ]; then
   echo -e "#!/bin/bash\n
@@ -1108,7 +1133,7 @@ echo
 
 # MAIN LOGIC: PROCESS COMPLETED; WRAPPING UP =================================
 
-# confirm to keep the vault (option to fully bail out)
+# confirm to keep the vault (the final option to fully bail out)
 echo -n "Crypto vault \"${CRYPTOVAULT_LABEL}\" has been created. Keep this new vault (y/n)? "
 old_stty_cfg=$(stty -g)
 stty raw -echo
@@ -1120,7 +1145,7 @@ if echo "$answer" | grep -iq "^n" ; then
   cleanup
 else
 
-  # deactivate 'cleanup' trap (INT TERM)
+  # deactivate 'cleanup interrupt' trap (INT TERM)
   trap - INT TERM
   # activate 'cleanup nodelete' trap (INT TERM)
   trap 'echo && echo "Closing the crypto vault." && cleanup nodelete' INT TERM
