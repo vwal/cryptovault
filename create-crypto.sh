@@ -846,7 +846,7 @@ done
 #TODO: find home for the $vaultpath_owner -> suggest for commanddir_parent 
 #      (this can be, and often is, equal to $HOME, but it doesn't matter - we use it as-is)
 
-$vaultpath_owner_home=/home/ville
+vaultpath_owner_home=$(getent passwd ${vaultpath_owner} | cut -d: -f6)
 
 # CRYPTO VAULT COMMAND DIRECTORY PARENT
 if [ "$vaultpath_owner" = "root" ]; then
