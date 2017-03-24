@@ -1,0 +1,5 @@
+
+NOTE: The command files should use absolute paths to the vault file and the mount point so that the commands can be moved.
+
+NOTE: Consider how sudo is implemented.. it must be dynamic, because if the command files are created by the root, 
+      sudo would not be required, but then if root moves the command dir to a user's home dir, sudo may be required.
