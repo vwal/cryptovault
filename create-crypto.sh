@@ -421,11 +421,18 @@ cleanup() {
             
     elif [ -d $CRYPTOVAULT_COMMANDDIR ]; then
 
-      #TODO: is sudo required? Even for the test above?
-      # use, probably, mount_fileop_sudoreq (although there may be further detail for this: mount_owner's home, SCRIPTHOME...)
+      if [ "$command_fileop_sudoreq" = "false" ]; then
+        rm -rf "$CRYPTOVAULT_COMMANDDIR"
+        _ret=$?
+      else
+        sudoit _ret rm -rf "$CRYPTOVAULT_COMMANDDIR"      
+      fi
 
-      rm -rf $CRYPTOVAULT_COMMANDDIR
-      echo "Generated command files removed."
+      if [ ${_ret} -ne 0 ]; then
+        echo "Unable to remove the command file directory \"$CRYPTOVAULT_COMMANDDIR\"."
+      else
+        echo "Command file directory \"$CRYPTOVAULT_COMMANDDIR\" removed (it and the command files within were created during this process)."
+      fi
     fi
 
     echo
@@ -669,7 +676,7 @@ ${vaulthome_example}" 25 75
     0)
       break;;
     1)
-      ;;
+      early_exit;;
   esac
   
 done
@@ -741,7 +748,7 @@ NOTE: Since the crypto vaults are mapped through /dev/mapper system-wide (even w
         0)
           break;;
         1)
-          ;;
+          early_exit;;
       esac
 
     fi
@@ -834,7 +841,7 @@ ${mountpoint_example}" 27 75
       0)
         break;;
       1)
-        ;;
+        early_exit;;
     esac
   
   else
@@ -852,19 +859,19 @@ vaultpath_owner_home=$(getent passwd ${vaultpath_owner} | cut -d: -f6)
 if [ "$vaultpath_owner" = "root" ]; then
   commanddir_parent_example="\nSuggested system-wide command directory parent: /usr/bin or /opt (or /root if this is a vault for the root user)"
 else
-  commanddir_parent_example="\nSuggested command directory parent (the home directory of the crypto vault owner): ${vaultpath_owner_home}"
+  commanddir_parent_example="\nSuggested command directory parent (the home directory of the crypto vault owner based on the vault file location): ${vaultpath_owner_home}"
 fi
 
 while true; do
-  dialog --title "Command directory parent selection" --msgbox "\nOn the next screen select the location where you want the crypto vault command directory to be created.\n\n
+  dialog --title "Command directory PARENT location selection" --msgbox "\nOn the next screen select the *PARENT* directory where you want the crypto vault command directory to be created.\n\n
 If this is a system-wide vault, select /opt or /usr/bin for the parent (a directory for the command files will be created below it). For a personal vault, the home directory of the vault file owner is recommended.\n\n
-NOTE: When a user directory is selected, the vault mount/unmount commands are made executable by the user who owns the selected parent. When a system location (or /root) is selected, the vault mount/unmount commands are made executable only by the root user, and hence non-privileged users must use sudo to execute them. The generated commands can be moved to a different location (they use absolute paths).\n\n
+NOTE: When a user directory is selected, the vault mount/unmount commands are made executable by the user who owns the selected parent. When a system location (or /root) is selected, the vault mount/unmount commands are made executable only by the root user, and hence the non-privileged users must use sudo to execute them. The generated commands can be moved to a different location (they use absolute paths).\n\n
 NOTE: Use Up/Dn [arrow] to move to move the selector, SPACE to copy selected directory to the edit line, and ENTER to accept the current path in the edit box. 
 To move to subdir/parent, add/remove \"/\" after the directory name on the edit line.\n\n
 NOTE: This directory location must exist; you may not define a non-existing path!\n\n
-${mountpoint_example}" 30 80
+${commanddir_parent_example}" 30 90
 
-  COMMANDDIR_PARENT=$(dialog --title "Command directory parent selection" --dselect ${vaultpath_owner_home}/ 16 60 2>&1 > /dev/tty)
+  COMMANDDIR_PARENT=$(dialog --title "Command directory PARENT location selection" --dselect ${vaultpath_owner_home}/ 16 60 2>&1 > /dev/tty)
   _ret=$?
 
   #remove slash from the end if there is one
@@ -874,7 +881,7 @@ ${mountpoint_example}" 30 80
     0)
       ;;
     1)
-      exit 1;;
+      early_exit;;
   esac
 
   find_existing_parent commanddir_existing_parent $COMMANDDIR_PARENT
@@ -900,7 +907,7 @@ ${mountpoint_example}" 30 80
   commanddir_parent_selection_info=""
   confirm=false
   if [ "$COMMANDDIR_PARENT" = "$MOUNTPOINT" ]; then
-    commanddir_parent_selection_info="The mountpoint may not be the parent for the command directory; the mountpoint directory must always remain empty. Select another directory for the command directory parent."
+    commanddir_parent_selection_info="The selected mountpoint may not be the parent for the command directory; the mountpoint directory must always remain empty. Select another directory for the command directory parent."
   else      
     commanddir_owner_info=""
     if [ "$current_user" != "$commanddir_parent_owner" ]; then
@@ -919,9 +926,9 @@ ${mountpoint_example}" 30 80
   
     case ${_ret} in
       0)
-        $CRYPTOVAULT_COMMANDDIR="${COMMANDDIR_PARENT}/${CRYPTOVAULT_LABEL}-commands" && break;;
+        CRYPTOVAULT_COMMANDDIR="${COMMANDDIR_PARENT}/${CRYPTOVAULT_LABEL}-commands" && break;;
       1)
-        ;;
+        early_exit;;
     esac
   
   else
@@ -935,7 +942,7 @@ Vault filesystem: ${CRYPTOVAULT_FS}\n
 Vault size: ${VAULTSIZEVAL}${VAULTSIZEUNIT}\n
 Vault label: ${CRYPTOVAULT_LABEL}\n
 Vault file path: ${VAULTFILE_FQFN} (owned by ${vaultpath_owner})\n
-Vault mount path: ${MOUNTPOINT} (owned by ${mountpath_owner})\n\n
+Vault mount path: ${MOUNTPOINT} (owned by ${mountpath_owner})\n
 Vault command file path: ${CRYPTOVAULT_COMMANDDIR} (owned by ${commanddir_parent_owner})\n\n
 If the values are not correct, cancel and run the script again.\n\nDo you want to proceed?" 25 80
 _ret=$?
