@@ -1,8 +1,5 @@
 #!/bin/bash
 
-#TODO: selected dirs/files do not currently check for existence of similarly-named files/dirs/symlinks
-#      (i.e. other than their own type)
-
 trap "early_exit" INT TERM
 
 # COLOR DEFINITIONS ==========================================================
@@ -164,7 +161,7 @@ get_sudo_pwd() {
       0)
         validate_sudopwd;;
       1)
-        exit 1;;
+        early_exit;;
     esac
   done
 }
@@ -447,12 +444,16 @@ cleanup() {
 
 # exit before the action begins
 early_exit() {
-  clear
-  echo
-  echo "Crypto disk creation cancelled."
-  echo
-  
-  exit 1
+
+  dialog --title "Confirm script termination" --yesno "\nAre you sure you want to exit the crypt vault creation process?" 7 70
+  _ret=$?
+
+  case ${_ret} in
+    0)
+      clear && echo -e "\nCrypto disk creation cancelled.\n\n" && exit 1;;
+    1)
+      ;;
+  esac
 }
 
 # clean exit
@@ -503,40 +504,44 @@ fi
 # MAIN LOGIC: QUERY VAULT PARAMETERS =========================================
 
 # FILE SYSTEM SELECTION
-SELECT_CRYPTO_FS=$(dialog --title "Select crypto vault file system" --radiolist "\nSelect the file system for the encrypted vault.\nZFS is recommended for multiple reasons.\n\n
+while true; do
+  SELECT_CRYPTO_FS=$(dialog --title "Select crypto vault file system" --radiolist "\nSelect the file system for the encrypted vault.\nZFS is recommended for multiple reasons.\n\n
 NOTE: Highlight the choice with up/down arrow, select with SPACE." 20 55 2 \
             1 zfs on \
             2 ext4 off \
           2>&1 > /dev/tty)
-_ret=$?
+  _ret=$?
 
-# ok (proceed) / cancel
-case ${_ret} in
-  0)
-    ;;
-  1)
-    exit 1;;
-esac
+  # ok (proceed) / cancel
+  case ${_ret} in
+    0)
+      ;;
+    1)
+      early_exit && continue;;
+  esac
 
-if [ "$SELECT_CRYPTO_FS" = "1" ]; then
-  CRYPTOVAULT_FS="zfs"
+  if [ "$SELECT_CRYPTO_FS" = "1" ]; then
+    CRYPTOVAULT_FS="zfs"
 
-  ZFS=$(sudo which zfs)
-  if [ $? -ne 0 ]; then
-    printf "\n\n**************************************************************************************************************************************\n\
+    ZFS=$(sudo which zfs)
+    if [ $? -ne 0 ]; then
+      printf "\n\n**************************************************************************************************************************************\n\
 To use ZFS filesystem zfsutils-linux package is required. Install it first with 'sudo apt-get install zfsutils-linux', then try again!\
 \n**************************************************************************************************************************************\n\n\n"
 
-#TODO: Offer install zfsutils-linux, proceed if user chooses to do so, and if installation is successful.
-#      Must use sudo. Must support at least yum and apt.
+  #TODO: Offer install zfsutils-linux, proceed if user chooses to do so, and if installation is successful.
+  #      Must use sudo. Must support at least yum and apt.
 
-    exit 1
+      exit 1
+    fi
+    break
+    
+  elif [ "$SELECT_CRYPTO_FS" = "2" ]; then
+    CRYPTOVAULT_FS="ext4"
+    break
   fi
 
-else
-  CRYPTOVAULT_FS="ext4"
-fi
-
+done
 
 # ENCRYPTION PASSWORD SELECTION
 while true; do
@@ -548,7 +553,7 @@ while true; do
     0)
       ;;
     1)
-      exit 1;;
+      early_exit && continue;;
   esac
 
   CRYPT_PASS_SEL_2=$(dialog --title "Repeat encryption password" --insecure --passwordbox "\nEnter again the passphrase you want the vault to be encrypted with.\n\n" 12 50 2>&1 > /dev/tty)
@@ -559,7 +564,7 @@ while true; do
     0)
       ;;
     1)
-      exit 1;;
+      early_exit && continue;;
   esac
 
   if [ "${CRYPT_PASS_SEL_1}" = "${CRYPT_PASS_SEL_2}" ]; then
@@ -586,7 +591,7 @@ while true; do
     0)
       ;;
     1)
-      exit 1;;
+      early_exit && continue;;
   esac
   
   if [[ $CRYPTOVAULTSIZEINPUT =~ ^([0-9]+)[[:space:]]*(MB|Mb|mb|GB|Gb|gb)$ ]]; then
@@ -637,7 +642,7 @@ ${vaulthome_example}" 25 75
     0)
       ;;
     1)
-      exit 1;;
+      early_exit && continue;;
   esac
 
   find_existing_parent vaultpath_existing_parent $VAULTFILE_HOME
@@ -676,7 +681,7 @@ ${vaulthome_example}" 25 75
     0)
       break;;
     1)
-      early_exit;;
+      ;;
   esac
   
 done
@@ -693,7 +698,7 @@ NOTE: Since the crypto vaults are mapped through /dev/mapper system-wide (even w
     0)
       ;;
     1)
-      exit 1;;
+      early_exit && continue;;
   esac
 
   CRYPTOVAULT_LABEL=$(echo "${CRYPTOVAULT_LABEL_INPUT// /}")
@@ -730,14 +735,6 @@ NOTE: Since the crypto vaults are mapped through /dev/mapper system-wide (even w
       fi    
 
       dialog --title "ERROR" --msgbox "$vaultname_conflict_message" 14 50
-      _ret=$?
-  
-      case ${_ret} in
-        0)
-          ;;
-        1)
-          exit 1;;
-      esac
 
     else
       VAULTFILE_FQFN=${VAULTFILE_HOME}/${CRYPTOVAULT_LABEL}
@@ -748,7 +745,7 @@ NOTE: Since the crypto vaults are mapped through /dev/mapper system-wide (even w
         0)
           break;;
         1)
-          early_exit;;
+          ;;
       esac
 
     fi
@@ -784,7 +781,7 @@ ${mountpoint_example}" 27 75
     0)
       ;;
     1)
-      exit 1;;
+      early_exit && continue;;
   esac
 
   find_existing_parent mountpath_existing_parent $MOUNTPOINT
@@ -841,7 +838,7 @@ ${mountpoint_example}" 27 75
       0)
         break;;
       1)
-        early_exit;;
+        ;;
     esac
   
   else
@@ -849,9 +846,6 @@ ${mountpoint_example}" 27 75
   fi
   
 done
-
-#TODO: find home for the $vaultpath_owner -> suggest for commanddir_parent 
-#      (this can be, and often is, equal to $HOME, but it doesn't matter - we use it as-is)
 
 vaultpath_owner_home=$(getent passwd ${vaultpath_owner} | cut -d: -f6)
 
@@ -863,7 +857,7 @@ else
 fi
 
 while true; do
-  dialog --title "Command directory PARENT location selection" --msgbox "\nOn the next screen select the *PARENT* directory where you want the crypto vault command directory to be created.\n\n
+  dialog --title "Command directory PARENT location selection" --msgbox "\nOn the next screen select the *PARENT* directory where you want the crypto vault command directory (\"${CRYPTOVAULT_LABEL}-commands\") to be created.\n\n
 If this is a system-wide vault, select /opt or /usr/bin for the parent (a directory for the command files will be created below it). For a personal vault, the home directory of the vault file owner is recommended.\n\n
 NOTE: When a user directory is selected, the vault mount/unmount commands are made executable by the user who owns the selected parent. When a system location (or /root) is selected, the vault mount/unmount commands are made executable only by the root user, and hence the non-privileged users must use sudo to execute them. The generated commands can be moved to a different location (they use absolute paths).\n\n
 NOTE: Use Up/Dn [arrow] to move to move the selector, SPACE to copy selected directory to the edit line, and ENTER to accept the current path in the edit box. 
@@ -881,11 +875,23 @@ ${commanddir_parent_example}" 30 90
     0)
       ;;
     1)
-      early_exit;;
+      early_exit && continue;;
   esac
 
   find_existing_parent commanddir_existing_parent $COMMANDDIR_PARENT
-  # DO NOT ACCEPT IF $COMMANDDIR_PARENT != $commanddir_existing_parent 
+
+  if [ "${COMMANDDIR_PARENT}" != "${commanddir_existing_parent}" ]; then
+    dialog --title "ERROR" --msgbox "\nThe selected parent directory must exist! Please select an existing directory where the command directory will be created." 14 50
+    continue  
+  fi
+
+  CRYPTOVAULT_COMMANDDIR="${COMMANDDIR_PARENT}/${CRYPTOVAULT_LABEL}-commands"
+
+  if [ -e "${CRYPTOVAULT_COMMANDDIR}" ]; then
+    dialog --title "ERROR" --msgbox "\nThe directory you selected already contains a file or directory with the name of the command directory (\"${CRYPTOVAULT_LABEL}-commands\"). Please select a different parent directory, or remove the existing file/directory \"${CRYPTOVAULT_LABEL}-commands\" from the selected parent directory, and then try again." 14 70
+    continue  
+  fi
+
   find_dir_owner commanddir_parent_owner $COMMANDDIR_PARENT
 
   different_owners_WARNING=""
@@ -904,10 +910,10 @@ ${commanddir_parent_example}" 30 90
     command_fileop_sudoreq="false"
   fi
 
-  commanddir_parent_selection_info=""
-  confirm=false
   if [ "$COMMANDDIR_PARENT" = "$MOUNTPOINT" ]; then
-    commanddir_parent_selection_info="The selected mountpoint may not be the parent for the command directory; the mountpoint directory must always remain empty. Select another directory for the command directory parent."
+    dialog --title "ERROR" --msgbox "\nThe mountpoint directory may not be the parent for the command directory; the mountpoint directory must always remain empty. Select another directory for the command directory parent." 14 50
+    continue
+
   else      
     commanddir_owner_info=""
     if [ "$current_user" != "$commanddir_parent_owner" ]; then
@@ -917,24 +923,19 @@ ${commanddir_parent_example}" 30 90
         commanddir_owner_info="The selected location is owned by user \"$commanddir_parent_owner\", and the crypto vault management commands will be made private to that user.\n\n"
       fi
     fi
-    confirm=true
-  fi
 
-  if [ "$confirm" = "true" ]; then
-    dialog --title "Confirm selected command directory location" --yesno "\n${different_owners_WARNING}The full path of the command directory to be created:\n\n${COMMANDDIR_PARENT}/${CRYPTOVAULT_LABEL}-commands\n\n${commanddir_parent_selection_info}\n\n${commanddir_owner_info}Is this what you want?" 22 75
+    dialog --title "Confirm the selected command directory location" --yesno "\n${different_owners_WARNING}The full path of the command directory to be created:\n\n${CRYPTOVAULT_COMMANDDIR}\n\nNOTE: The command directory to be created is derived from the parent path you just selected + the vault name + the extension \"-commands\".\n\n${commanddir_owner_info}Is this what you want?" 18 75
     _ret=$?
   
     case ${_ret} in
       0)
-        CRYPTOVAULT_COMMANDDIR="${COMMANDDIR_PARENT}/${CRYPTOVAULT_LABEL}-commands" && break;;
+         break;;
       1)
-        early_exit;;
+        ;;
     esac
-  
-  else
-    dialog --title "ERROR" --msgbox "\n${commanddir_parent_selection_info}" 14 50
+
   fi
-  
+
 done
 
 dialog --title "Confirm to proceed" --yesno "\nIf you proceed, the encrypted vault will be created with the following parameters you have entered:\n\n
@@ -951,7 +952,7 @@ case ${_ret} in
   0)
     ;;
   1)
-    clear && echo -e "\n\e${BWhite}\e${On_Red} SCRIPT WAS CANCELLED \e${Color_Off}\n\n" && exit 1;;
+    clear && echo -e "\n\e${BWhite}\e${On_Red} CRYPTO VAULT CREATION WAS CANCELLED \e${Color_Off}\n\n" && exit 1;;
 esac
 
 # MAIN LOGIC: CREATE PATHS AND THE DISK ======================================
@@ -1026,7 +1027,7 @@ fi
 
 # test blank vaultfile creation
 if [ "$vaultfile_creation_error" = "true" ] ||
-   [ ! -f "${VAULTFILE_FQFN}" ]; then
+   [ ! -e "${VAULTFILE_FQFN}" ]; then
   echo -e "\e${BWhite}\e${On_Red}Could not create vault container file \"${VAULTFILE_FQFN}\". Unable to proceed.\e${Color_Off}"
   cleanup
 fi
