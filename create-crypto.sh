@@ -242,7 +242,7 @@ find_dir_owner() {
   eval "$1=$dirowner"
 }
 
-# is given path an ancestor to the second path (paths need not exist)
+# is the given path an ancestor to the second path (paths need not exist)
 dir_is_ancestor() {
   # $1 is the retval (_ret)
   # $2 is the base path (e.g. the potential ancestor)
@@ -251,18 +251,18 @@ dir_is_ancestor() {
   basepath="$2"
   newpath="$3"
 
-  bad_path=false
+  is_ancestor=false
   if [[ "$newpath" =~ ^(${basepath//\//\\\/})([^/]*)(.*)$ ]]; then
 
     if [ "${BASH_REMATCH[1]}" != "" ] && # i.e. basepath is matched
        [ "${BASH_REMATCH[2]}" = "" ] &&  # i.e. it is the exact base path (the last component of base path does not continue before the end/slash)
        [ "${BASH_REMATCH[3]}" != "" ]; then  # i.e. a deeper path exits; the basepath is an ancestor for the newpath!
 
-       bad_path=true
+       is_ancestor=true
     fi
   fi
 
-  if [ "${bad_path}" = "true" ]; then
+  if [ "${is_ancestor}" = "true" ]; then
     eval "$1=true"
   else
     eval "$1=false"
@@ -568,8 +568,8 @@ NOTE: Highlight the choice with up/down arrow, select with SPACE." 20 55 2 \
 To use ZFS filesystem zfsutils-linux package is required. Install it first with 'sudo apt-get install zfsutils-linux', then try again!\
 \n**************************************************************************************************************************************\n\n\n"
 
-  #TODO: Offer install zfsutils-linux, proceed if user chooses to do so, and if installation is successful.
-  #      Must use sudo. Must support at least yum and apt.
+#TODO: Offer install zfsutils-linux, proceed if user chooses to do so, and if installation is successful.
+#      Must use sudo. Must support at least yum and apt.
 
       exit 1
     fi
@@ -944,7 +944,7 @@ ${commanddir_parent_example}" 30 90
   if [ "$commanddir_parent_owner" != "$vaultpath_owner" ]; then
     different_owners_WARNING="WARNING: THE CRYPTO VAULT COMMAND DIRECTORY (${CRYPTOVAULT_LABEL}-commands), AND THE VAULT FILE PATH ($VAULTFILE_HOME) ARE OWNED BY DIFFERENT USERS (\"$commanddir_parent_owner\" and \"$vaultpath_owner\", respectively). If you proceed, the crypto vault owner may not be able to mount/unmount the vault!\n\n"
   elif [ "$commanddir_parent_owner" != "$mountpath_owner" ]; then
-    different_owners_WARNING="WARNING: THE CRYPTO VAULT COMMAND DIRECTORY (${CRYPTOVAULT_LABEL}-commands), AND THE MOUNTPOINT PATH ($MOUNTPOINT) ARE OWNED BY DIFFERENT USERS (\"$commanddir_parent__owner\" and \"$mountpath_owner\", respectively). If you proceed, the crypto vault owner may not be able to mount/unmount the vault!\n\n"
+    different_owners_WARNING="WARNING: THE CRYPTO VAULT COMMAND DIRECTORY (${CRYPTOVAULT_LABEL}-commands), AND THE MOUNTPOINT PATH ($MOUNTPOINT) ARE OWNED BY DIFFERENT USERS (\"$commanddir_parent_owner\" and \"$mountpath_owner\", respectively). If you proceed, the crypto vault owner may not be able to mount/unmount the vault!\n\n"
   fi
 
   # since the target command dirctory location is different from the current user, 
@@ -1216,30 +1216,91 @@ if [ ! -d ${SCRIPT_DIR}/_stubs ] ||
    [ ! -f ${SCRIPT_DIR}/_stubs/mount-crypto ] ||
    [ ! -f ${SCRIPT_DIR}/_stubs/umount-crypto ] ||
    [ ! -f ${SCRIPT_DIR}/_stubs/util-crypto ]; then
-  echo "The utility script stubs in \"_stubs\" subdirectory are missing. Unable to proceed. Please make sure that you have not altered the cloned \"cryptovault\" repository, and try again!"
+  echo "The utility script stubs in \"_stubs\" subdirectory are missing. Unable to proceed. Please make sure that you have not altered the cloned \"cryptovault\" repository (https://github.com/vwal/cryptovault), and try again!"
   cleanup 
 fi
 
-#TODO: Add URL to the cryptovault repository to the above comment."
+echo -e "\e${BIWhite}Creating the vault command script directory...\e${Color_Off}"
+executable="mkdir ${CRYPTOVAULT_COMMANDDIR}"
+if [ "$command_fileop_sudoreq" = "false" ]; then
+  echo -e "${executing}: $executable"
+  eval $executable 2>/dev/null
+  _ret=$?
+else
+  echo -e "${executing}$elevated: $executable"
+  sudoit _ret $executable
+fi
 
-#TODO: Should these utility scripts perhaps be copied to the homedir of the user who owns the mountpoint ($mountpath_owner)?
-#      mountpath_owner_home=$( getent passwd ${mountpath_owner} | cut -d: -f6 )
-#      Or perhaps inquire the user where they want these placed (and made executable to)?
+if [ ${_ret} -ne 0 ]; then
+  echo "Unable to create the vault command directory. Aborting."
+  cleanup
+fi
 
-echo -e "\e${BIWhite}Generating command scripts...\e${Color_Off}"
+echo -e "\e${BIWhite}Copying the vault command script stubs...\e${Color_Off}"
 
-mkdir $CRYPTOVAULT_COMMANDDIR
+# copy mount command stub
+executable="cp ${SCRIPT_DIR}/_stubs/mount-crypto ${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}"
+if [ "$command_fileop_sudoreq" = "false" ]; then
+  echo -e "${executing}: $executable"
+  eval $executable 2>/dev/null
+  _ret=$?
+else
+  echo -e "${executing}$elevated: $executable"
+  sudoit _ret $executable
+fi
 
-#TODO: File operation error checks
+if [ ${_ret} -eq 0 ]; then
+  echo "mount command script stub copied."
+else
+  echo "Unable to copy the mount command script stub to the vault command directory. Aborting."
+  cleanup
+fi
 
-cp ${SCRIPT_DIR}/_stubs/mount-crypto ${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}
-cp ${SCRIPT_DIR}/_stubs/umount-crypto ${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL}
-cp ${SCRIPT_DIR}/_stubs/util-crypto ${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL}
+# copy umount command stub
+executable="cp ${SCRIPT_DIR}/_stubs/umount-crypto ${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL}"
+if [ "$command_fileop_sudoreq" = "false" ]; then
+  echo -e "${executing}: $executable"
+  eval $executable 2>/dev/null
+  _ret=$?
+else
+  echo -e "${executing}$elevated: $executable"
+  sudoit _ret $executable
+fi
+
+if [ ${_ret} -eq 0 ]; then
+  echo "umount command script stub copied."
+else
+  echo "Unable to copy the umount command script stub to the vault command directory. Aborting."
+  cleanup
+fi
+
+# copy util command stub
+executable="cp ${SCRIPT_DIR}/_stubs/util-crypto ${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL}"
+if [ "$command_fileop_sudoreq" = "false" ]; then
+  echo -e "${executing}: $executable"
+  eval $executable 2>/dev/null
+  _ret=$?
+else
+  echo -e "${executing}$elevated: $executable"
+  sudoit _ret $executable
+fi
+
+if [ ${_ret} -eq 0 ]; then
+  echo "util command script stub copied."
+else
+  echo "Unable to copy the util command script stub to the vault command directory. Aborting."
+  cleanup
+fi
+
 
 #TODO: Use a tempfile instead of 'sponge'? (It's not a system command but provided by 'moreutils' package)
 #      NOTE: 'moreutils' is not currently checked in precheck, so it will potentially fail!
+#      NOTE: These commands are also subject to command_fileop_sudoreq!!
+
 
 # NOTE: The non-standard code indentation on the following items is intentional; do not modify it!
+
+echo -e "\e${BIWhite}Adding the vault-specific configuration variables to the command script stubs...\e${Color_Off}"
 
 if [ "$CRYPTOVAULT_FS" = "zfs" ]; then
   echo -e "#!/bin/bash\n
@@ -1258,14 +1319,14 @@ CRYPTOVAULT_MOUNTPOINT=${MOUNTPOINT}
 CRYPTOVAULT_LABEL=${CRYPTOVAULT_LABEL}\n" | cat - "${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}" | sponge "${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}"
 
 fi
-echo "Crypto vault mount script created at ${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}"
+echo "Crypto vault mount script now ready at ${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}"
 
 echo -e "#!/bin/bash\n
 CRYPTO_FQFN=${VAULTFILE_FQFN}
 CRYPTO_MOUNTPOINT=${MOUNTPOINT}
 CRYPTO_LABEL=${CRYPTOVAULT_LABEL}
 ZPOOL_ID=${zpool_id}\n" | cat - "${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL}" | sponge "${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL}"
-echo "Crypto vault umount script created at ${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL}"
+echo "Crypto vault umount script now ready at ${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL}"
 
 echo -e "#!/bin/bash\n
 CRYPTOVAULT_FS=${CRYPTOVAULT_FS}
@@ -1273,12 +1334,30 @@ CRYPTO_FQFN=${VAULTFILE_FQFN}
 CRYPTO_MOUNTPOINT=${MOUNTPOINT}
 CRYPTO_LABEL=${CRYPTOVAULT_LABEL}
 ZPOOL_ID=${zpool_id}\n" | cat - "${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL}" | sponge "${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL}"
-echo "Crypto vault utility script created at ${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL}"
-
+echo "Crypto vault utility script now ready at ${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL}"
 echo
 
-#TODO: set ownership & make executable for the commanddir & the commands (above)
+# set the owner for the command directory/scripts
+echo -e "\e${BIWhite}Setting the owner for the vault command scripts...\e${Color_Off}"
+executable="chown -R ${commanddir_parent_owner}:${commanddir_parent_owner} ${CRYPTOVAULT_COMMANDDIR}"
+echo -e "${executing}$elevated: $executable"
+sudoit _ret $executable
 
+if [ ${_ret} -eq 0 ]; then
+  echo "Unable to set the correct owner for the vault command directory/scripts. Aborting."
+  cleanup
+fi
+
+# set the permsissions for the command directory/scripts
+echo -e "\e${BIWhite}Setting the permissions for the vault command scripts...\e${Color_Off}"
+executable="chmod -R 750 ${CRYPTOVAULT_COMMANDDIR}"
+echo -e "${executing}$elevated: $executable"
+sudoit _ret $executable
+
+if [ ${_ret} -eq 0 ]; then
+  echo "Unable to set the necessary permissions for the vault command directory/scripts. Aborting."
+  cleanup
+fi
 
 # MAIN LOGIC: PROCESS COMPLETED; WRAPPING UP =================================
 
@@ -1309,5 +1388,7 @@ You can unmount/lock and remount/unlock the crypto vault at any time using the \
     1)
       clear && echo && echo "Closing the crypto vault." && cleanup nodelete;;
   esac
+
+#TODO: add a final note about the management commands (their location, use and who can use them natively/with sudo)
 
 fi
