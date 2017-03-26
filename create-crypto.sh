@@ -170,6 +170,7 @@ get_sudo_pwd() {
 # use the locally cached sudo password if sudo doesn't cache the password by policy (or if it has expired)
 sudoit() {
   # $1 is the retval (_ret)
+  # $2 (and ...) are the commands/args to execute with sudo
 
   if [ "$im_root" = "false" ]; then
     if sudo -n true 2>/dev/null; then 
@@ -193,6 +194,7 @@ sudoit() {
 sudoitas() {
   # $1 is the retval (_ret)
   # $2 is user to run as sudo (sudo_user)
+
   sudo_user=$2
   if sudo -n true 2>/dev/null; then 
     sudo -u $sudo_user "${@:3}" 2>/dev/null
@@ -207,6 +209,9 @@ sudoitas() {
 
 # find the first existing parent of the given dir
 find_existing_parent() {
+  # $1 is the retval (_ret)
+  # $2 is the path for which we're finding an existing parent
+
   pathname="$2"
 
   if [ -d "$pathname" ]; then
@@ -230,12 +235,46 @@ find_existing_parent() {
 
 # who owns the given dir
 find_dir_owner() {
+  # $1 is the retval (_ret)
+  # $2 is the path whose owner we're looking
+
   dirowner=$(ls -ld $2 | awk '{print $3}')
   eval "$1=$dirowner"
 }
 
+# is given path an ancestor to the second path (paths need not exist)
+dir_is_ancestor() {
+  # $1 is the retval (_ret)
+  # $2 is the base path (e.g. the potential ancestor)
+  # $3 is the new path (e.g. the potential child)
+
+  basepath="$2"
+  newpath="$3"
+
+  bad_path=false
+  if [[ "$newpath" =~ ^(${basepath//\//\\\/})([^/]*)(.*)$ ]]; then
+
+    if [ "${BASH_REMATCH[1]}" != "" ] && # i.e. basepath is matched
+       [ "${BASH_REMATCH[2]}" = "" ] &&  # i.e. it is the exact base path (the last component of base path does not continue before the end/slash)
+       [ "${BASH_REMATCH[3]}" != "" ]; then  # i.e. a deeper path exits; the basepath is an ancestor for the newpath!
+
+       bad_path=true
+    fi
+  fi
+
+  if [ "${bad_path}" = "true" ]; then
+    eval "$1=true"
+  else
+    eval "$1=false"
+  fi
+
+}
+
 # check mountpath against mounts in /proc/mounts
 check_mounted() {
+  # $1 is the retval (_ret)
+  # $2 is the path we're checking for active mountpoint
+
   if grep -qsE "^[^ ]+ $2" /proc/mounts; then
     response="true"
   else
@@ -801,11 +840,18 @@ ${mountpoint_example}" 27 75
     mount_fileop_sudoreq="false"
   fi
 
+  # check if the tentative mountpoint is an ancestor to the previously selected vault file home directory
+  dir_is_ancestor ancestor_check "$MOUNTPOINT" "$VAULTFILE_HOME"
+
   mountpoint_info=""
   confirm=false
   mountpoint_exists=true
   if [ "$MOUNTPOINT" = "$VAULTFILE_HOME" ]; then
     mountpoint_selection_info="Vault file path and the mountpoint cannot be the same directory; the mountpoint directory must always remain empty."
+
+  elif [ "$ancestor_check" = "true" ]; then
+    mountpoint_selection_info="The mountpoint directory you have selected is an ancestor to the the vault file path you selected earlier. Since the mountpoint directory must always remain empty, you must choose a different location."
+
   else    
     if [ -d "$MOUNTPOINT" ]; then
       if [ "$(ls -A $MOUNTPOINT)" ]; then
@@ -842,7 +888,7 @@ ${mountpoint_example}" 27 75
     esac
   
   else
-    dialog --title "ERROR" --msgbox "\n${mountpoint_selection_info}" 14 50
+    dialog --title "ERROR" --msgbox "\n${mountpoint_selection_info}" 15 70
   fi
   
 done
