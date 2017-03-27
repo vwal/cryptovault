@@ -1292,23 +1292,23 @@ else
   cleanup
 fi
 
-
-#TODO: Use a tempfile instead of 'sponge'? (It's not a system command but provided by 'moreutils' package)
-#      NOTE: 'moreutils' is not currently checked in precheck, so it will potentially fail!
-#      NOTE: These commands are also subject to command_fileop_sudoreq!!
-
-
-# NOTE: The non-standard code indentation on the following items is intentional; do not modify it!
+# create file descriptor reference to a deleted temp file (automatically purged on exit)
+tmpfile=$(mktemp /tmp/tmp.XXXXXX)
+exec 3>"$tmpfile"
+rm "$tmpfile"
 
 echo -e "\e${BIWhite}Adding the vault-specific configuration variables to the command script stubs...\e${Color_Off}"
 
+# NOTE: The non-standard code indentation on the following items is intentional; do not modify it!
+
+# prepare mount script
 if [ "$CRYPTOVAULT_FS" = "zfs" ]; then
   echo -e "#!/bin/bash\n
 CRYPTOVAULT_FS=${CRYPTOVAULT_FS}
 CRYPTOVAULT_FQFN=${VAULTFILE_FQFN}
 CRYPTOVAULT_MOUNTPOINT=${MOUNTPOINT}
 CRYPTOVAULT_LABEL=${CRYPTOVAULT_LABEL}
-ZPOOL_ID=${zpool_id}\n" | cat - "${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}" | sponge "${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}"
+ZPOOL_ID=${zpool_id}\n" > /dev/fd/3
 
 else
 
@@ -1316,24 +1316,62 @@ else
 CRYPTOVAULT_FS=${CRYPTOVAULT_FS}
 CRYPTOVAULT_FQFN=${VAULTFILE_FQFN}
 CRYPTOVAULT_MOUNTPOINT=${MOUNTPOINT}
-CRYPTOVAULT_LABEL=${CRYPTOVAULT_LABEL}\n" | cat - "${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}" | sponge "${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}"
+CRYPTOVAULT_LABEL=${CRYPTOVAULT_LABEL}\n" > /dev/fd/3
 
 fi
+
+# append stub file into the temp file descriptor
+#TODO: make below command subject to  command_fileop_sudoreq!!
+sudoit _ret cat "${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}" >> /dev/fd/3
+
+# replace the original script with the prepended script
+#TODO: make below command subject to  command_fileop_sudoreq!!
+cat /dev/fd/3 | sudoit _ret dd of="${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}"
+
+# purge the file descriptor
+cat /dev/null > /dev/fd/3
+
 echo "Crypto vault mount script now ready at ${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}"
 
+# prepare umount script
 echo -e "#!/bin/bash\n
 CRYPTO_FQFN=${VAULTFILE_FQFN}
 CRYPTO_MOUNTPOINT=${MOUNTPOINT}
 CRYPTO_LABEL=${CRYPTOVAULT_LABEL}
-ZPOOL_ID=${zpool_id}\n" | cat - "${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL}" | sponge "${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL}"
+ZPOOL_ID=${zpool_id}\n" > /dev/fd/3
+
+# append stub file into the temp file descriptor
+#TODO: make below command subject to  command_fileop_sudoreq!!
+sudoit _ret cat "${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL}" >> /dev/fd/3
+
+# replace the original script with the prepended script
+#TODO: make below command subject to  command_fileop_sudoreq!!
+cat /dev/fd/3 | sudoit _ret dd of="${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL}"
+
+# purge the file descriptor
+cat /dev/null > /dev/fd/3
+
 echo "Crypto vault umount script now ready at ${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL}"
 
+# prepare the util script
 echo -e "#!/bin/bash\n
 CRYPTOVAULT_FS=${CRYPTOVAULT_FS}
 CRYPTO_FQFN=${VAULTFILE_FQFN}
 CRYPTO_MOUNTPOINT=${MOUNTPOINT}
 CRYPTO_LABEL=${CRYPTOVAULT_LABEL}
-ZPOOL_ID=${zpool_id}\n" | cat - "${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL}" | sponge "${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL}"
+ZPOOL_ID=${zpool_id}\n" > /dev/fd/3
+
+# append stub file into the temp file descriptor
+#TODO: make below command subject to  command_fileop_sudoreq!!
+sudoit _ret cat "${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL}" >> /dev/fd/3
+
+# replace the original script with the prepended script
+#TODO: make below command subject to  command_fileop_sudoreq!!
+cat /dev/fd/3 | sudoit _ret dd of="${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL}"
+
+# purge the file descriptor
+cat /dev/null > /dev/fd/3
+
 echo "Crypto vault utility script now ready at ${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL}"
 echo
 
