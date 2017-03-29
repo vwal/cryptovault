@@ -157,6 +157,7 @@ get_sudo_pwd() {
     fi
 
     # ok (proceed) / cancel
+    # note: validate_sudopwd exits the while loop when pass
     case ${_ret} in
       0)
         validate_sudopwd;;
@@ -267,6 +268,92 @@ dir_is_ancestor() {
   else
     eval "$1=false"
   fi
+
+}
+
+# find the first available directory name with an appended ordinal;
+# start from 2 (as if the matching name already exists, it's
+# essentially the first one.
+get_first_available_dir() {
+  # $1 is the retval (_ret)
+  # $2 is the dir to check
+  # $3 modifies the check behavior:
+  #   new: increment [named] if existing
+  #   any: offer first available [named] directory (including existing if not mounted); new if no directory exists
+
+  local dir_to_check=$2
+  local checktype=$3
+  local dir_to_check_mounted=""
+
+  if [ ! -e ${dir_to_check} ]; then
+    # use the name as-is (the named directory gets created)
+    n=""
+
+  else
+    check_mounted dir_to_check_mounted ${dir_to_check}
+
+    if [ -d "${dir_to_check}" ] &&
+       [ "${checktype}" = "any" ] &&
+       [ "${dir_to_check_mounted}" = "false" ]; then
+       # dir exists and is not mounted; use it as-is ("any" is requested)
+      n=""
+    elif [ -d "${dir_to_check}" ] &&
+         [ "${checktype}" = "any" ] &&
+         [ "${dir_to_check_mounted}" = "true" ]; then
+      # dir exists but is mounted, increment!
+      n=2
+    else # this server "any" that wasn't matched as well as "new"
+      # dir or file of the same name exists and "new" is requested -> increment!
+      n=2
+    fi
+
+    if [ "${n}" = "2" ]; then
+      local check_for_mount=""
+      local dir_is_mounted="false"
+
+      while true; do
+        check_for_mount="${dir_to_check}${n}"
+        if [ -d "${check_for_mount}" ]; then
+          check_mounted dir_is_mounted ${check_for_mount}
+        fi
+        if [ ! -e "${check_for_mount}" ] ||
+           [ "${dir_is_mounted}" = "false" ]; then
+          break
+        fi
+
+        # prepare for the next iteration
+        dir_is_mounted="false"
+        n++
+
+      done
+    fi
+
+  fi
+
+  eval "$1=${dir_to_check}${n}"
+
+}
+
+# find the first available filename with an appended ordinal;
+# start from 2 (as if the matching name already exists, it's
+# essentially the first one.
+get_first_available_file() {
+  # $1 is the retval (_ret)
+  # $2 is the file to check
+  # $3 is the directory to check in (no recursion)
+
+  local file_to_check=$2
+  local dir_to_check=$3
+
+  if [ ! -e "${dir_to_check}/${file_to_check}" ]; then
+    n=""
+  else
+    n=2
+    while [ -e "${dir_to_check}/${file_to_check}${n}" ]; do
+      ((++n))
+    done
+  fi
+  eval "$1=${file_to_check}${n}"
 
 }
 
@@ -388,7 +475,7 @@ cleanup() {
     
     # remove the vault file 
     if [ -f $VAULTFILE_FQFN  ]; then
-      
+
       if [ "$vault_fileop_sudoreq" = "false" ]; then
         rm -f "$VAULTFILE_FQFN"
         _ret=$?
@@ -654,12 +741,16 @@ while true; do
   
 done
 
-
 # VAULT FILE LOCATION
+
 if [ "$current_user" = "root" ]; then
-  vaulthome_example="\nSuggested system-wide mountpoint location: /mnt/cryptovault"
+  initial_suggested_vaulthome_dir=/var/vaultfiles
+  get_first_available_dir suggested_vaulthome_dir $initial_suggested_vaulthome_dir "any"
+  vaulthome_example="\nSuggested system-wide vault file location: $suggested_vaulthome_dir"
 else
-  vaulthome_example="\nSuggested mountpoint location: ${HOME}/cryptovault"
+  initial_suggested_vaultfile_dir=${HOME}/vaultfiles
+  get_first_available_dir suggested_vaultfile_dir $initial_suggested_vaultfile_dir "any"
+  vaulthome_example="\nSuggested vault file location: ${suggested_vaultfile_dir}"
 fi
 
 while true; do
@@ -668,10 +759,10 @@ If this is a system-wide vault, use a path, for example, under /var/ (such as /v
 NOTE: In this step you will select the directory where the vault file is saved. In the next step you will select the vault file name/label.\n\n
 NOTE: Use Up/Dn [arrow] to move to move the selector, SPACE to copy selected directory to the edit line, and ENTER to accept the current path in the edit box. 
 To move to subdir/parent, add/remove \"/\" after the directory name on the edit line.\n\n
-NOTE: If a non-existent path is entered, the directory/directories will be created.\n\n
+NOTE: If a previously non-existing path is entered, the directory/directories will be created. To accept the suggested path, just hit Enter on the next screen..\n\n
 ${vaulthome_example}" 25 75
 
-  VAULTFILE_HOME=$(dialog --title "Vault file location selection" --dselect ${HOME}/ 16 60 2>&1 > /dev/tty)
+  VAULTFILE_HOME=$(dialog --title "Vault file location selection" --dselect ${suggested_vaultfile_dir} 16 60 2>&1 > /dev/tty)
   _ret=$?
 
   #remove slash from the end if there is one
@@ -727,9 +818,14 @@ done
 
 
 # VAULT LABEL/FILE NAME
+initial_suggested_vault_label=cryptovault
+get_first_available_file suggested_vault_label $initial_suggested_vault_label $VAULTFILE_HOME
+vaultlabel_example="\nSuggested vault label: ${suggested_vault_label}"
+
 while true; do
   CRYPTOVAULT_LABEL_INPUT=$(dialog --title "Crypto Vault Label/File Name" --inputbox "\nEnter the desired crypto vault label (no spaces). It will also be used as the crypto vault file name.\n\n
-NOTE: Since the crypto vaults are mapped through /dev/mapper system-wide (even when access is limited to a specific user), the label must be unique on the system.\n" 15 55 2>&1 > /dev/tty)
+NOTE: Since the crypto vaults are mapped through /dev/mapper system-wide (even when access is limited to a specific user), the label must be unique on the system.\n
+NOTE: To accept the default/suggestion, just hit ENTER\n" 17 70 "${suggested_vault_label}" 2>&1 > /dev/tty)
   _ret=$?
 
   # ok (proceed) / cancel
@@ -759,12 +855,11 @@ NOTE: Since the crypto vaults are mapped through /dev/mapper system-wide (even w
       fi
     done
 
-    for i in $VAULTFILE_HOME/*; do
-      thisbase=$(basename $i)
-      if [ "$thisbase" = "$CRYPTOVAULT_LABEL" ]; then
-        vaultname_conflict="true"
-      fi
-    done
+    VAULTFILE_FQFN="${VAULTFILE_HOME}/${CRYPTOVAULT_LABEL}"
+
+    if [ -e "${VAULTFILE_FQFN}" ]; then
+      vaultname_conflict="true"
+    fi  
 
     if [ "$vaultname_conflict" = "true" ]; then
       if [ "$mapper_conflict" = "true" ]; then
@@ -774,9 +869,9 @@ NOTE: Since the crypto vaults are mapped through /dev/mapper system-wide (even w
       fi    
 
       dialog --title "ERROR" --msgbox "$vaultname_conflict_message" 14 50
-
+      VAULTFILE_FQFN=""
+      
     else
-      VAULTFILE_FQFN=${VAULTFILE_HOME}/${CRYPTOVAULT_LABEL}
       dialog --title "Confirm selected label/filename" --yesno "\nYou selected crypto vault label / file name:\n\n${CRYPTOVAULT_LABEL}\n\nThe full vault file path will be:\n\n${VAULTFILE_FQFN}\n\nIs this what you want?" 16 70
       _ret=$?
   
@@ -793,12 +888,17 @@ NOTE: Since the crypto vaults are mapped through /dev/mapper system-wide (even w
 
 done
 
+#TODO: same process as for the vaultfile home selection!
 
 # VAULT MOUNTPOINT
 if [ "$current_user" = "root" ]; then
-  mountpoint_example="\nSuggested system-wide mountpoint location: /mnt/cryptovault"
+  suggested_mountpoint_dir=/mnt/cryptovault
+  get_first_available_dir suggested_mountpoint_dir $suggested_mountpoint_dir "any"
+  mountpoint_example="\nSuggested system-wide mountpoint location: ${suggested_mountpoint_dir}"
 else
-  mountpoint_example="\nSuggested mountpoint location: ${HOME}/cryptovault"
+  suggested_mountpoint_dir=${HOME}/cryptovault
+  get_first_available_dir suggested_mountpoint_dir $suggested_mountpoint_dir "any"
+  mountpoint_example="\nSuggested mountpoint location: ${suggested_mountpoint_dir}"
 fi
 
 while true; do
@@ -807,10 +907,11 @@ If this is a system-wide vault, use a path under /mnt/. For a personal vault, se
 NOTE: Use Up/Dn [arrow] to move to move the selector, SPACE to copy selected directory to the edit line, and ENTER to accept the current path in the edit box. 
 To move to subdir/parent, add/remove \"/\" after the directory name on the edit line.\n\n
 NOTE: If a non-existent path is entered, the directory/directories will be created. Existing but non-empty directories are not accepted. This directory can not be used for other purposes.\n\n
-NOTE: Global locations (e.g. /mnt/mountdir) are set up for root access, while user-owned locations (e.g. /home/alice/mountdir) are set up for the owner of the parent dir (i.e. \"alice\" in this example).\n\n
-${mountpoint_example}" 27 75
+NOTE: Global locations (e.g. /mnt/mountdir) are set up for root access, while user-owned locations (e.g. /home/alice/mountdir) are set up for the owner of the parent dir (i.e. \"alice\" in this example).\n
+NOTE: To accept the suggested mountpoint, just hit Enter on the next screen.\n\n
+${mountpoint_example}" 27 80
 
-  MOUNTPOINT=$(dialog --title "Mountpoint selection" --dselect ${HOME}/ 16 60 2>&1 > /dev/tty)
+  MOUNTPOINT=$(dialog --title "Mountpoint selection" --dselect ${suggested_mountpoint_dir} 16 60 2>&1 > /dev/tty)
   _ret=$?
 
   #remove slash from the end if there is one
@@ -894,6 +995,10 @@ ${mountpoint_example}" 27 75
 done
 
 vaultpath_owner_home=$(getent passwd ${vaultpath_owner} | cut -d: -f6)
+
+#TODO: Allow selection of the directory-to-be-created,
+#      but REQUIRE a previously non-existing directory ("new")
+#      TO BE CREATED, then confirm that directory doesn't exist
 
 # CRYPTO VAULT COMMAND DIRECTORY PARENT
 if [ "$vaultpath_owner" = "root" ]; then
@@ -991,7 +1096,7 @@ Vault label: ${CRYPTOVAULT_LABEL}\n
 Vault file path: ${VAULTFILE_FQFN} (owned by ${vaultpath_owner})\n
 Vault mount path: ${MOUNTPOINT} (owned by ${mountpath_owner})\n
 Vault command file path: ${CRYPTOVAULT_COMMANDDIR} (owned by ${commanddir_parent_owner})\n\n
-If the values are not correct, cancel and run the script again.\n\nDo you want to proceed?" 25 80
+If the values are not correct, cancel and run the script again.\n\nDo you want to proceed?" 25 90
 _ret=$?
   
 case ${_ret} in
@@ -1025,15 +1130,13 @@ if [ "$vaultpath_exists" = "false" ]; then
   if [ "$vaultpath_owner" = "$current_user" ]; then
     echo -e "$executing: $executable"
     eval $executable 2>/dev/null
-    if [ $? -ne 0 ]; then
-      vaultpath_creation_error="true"
-    fi    
+    _ret=$?
   else
     echo -e "${executing}$elevated (as $vaultpath_owner): $executable"
     sudoitas _ret $vaultpath_owner $executable
-    if [ ${_ret} -ne 0 ]; then
-      vaultpath_creation_error="true"
-    fi
+  fi
+  if [ ${_ret} -ne 0 ]; then
+    vaultpath_creation_error="true"
   fi
  
   # test vaultpath creation
