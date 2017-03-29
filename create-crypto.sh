@@ -343,15 +343,25 @@ get_first_available_file() {
   # $3 is the directory to check in (no recursion)
 
   local file_to_check=$2
-  local dir_to_check=$3
+  local dir_to_check_in=$3
 
-  if [ ! -e "${dir_to_check}/${file_to_check}" ]; then
+  local file_fqfn="${dir_to_check_in}/${file_to_check}"
+
+  if [ ! -e "${file_fqfn}" ]; then
     n=""
   else
     n=2
-    while [ -e "${dir_to_check}/${file_to_check}${n}" ]; do
-      ((++n))
+
+    while true; do
+      file_fqfn="${dir_to_check_in}/${file_to_check}${n}"
+      if [ ! -e "${file_fqfn}" ]; then
+        break
+      fi
+
+      # prepare for the next iteration
+      n++
     done
+
   fi
   eval "$1=${file_to_check}${n}"
 
@@ -480,7 +490,7 @@ cleanup() {
         rm -f "$VAULTFILE_FQFN"
         _ret=$?
       else
-        sudoit _ret rm -f "$VAULTFILE_FQFN"      
+        sudoit _ret rm -f "$VAULTFILE_FQFN"
       fi
 
       if [ ${_ret} -ne 0 ]; then
