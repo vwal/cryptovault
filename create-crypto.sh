@@ -280,6 +280,7 @@ get_first_available_dir() {
   # $3 modifies the check behavior:
   #   new: increment [named] if existing
   #   any: offer first available [named] directory (including existing if not mounted); new if no directory exists
+  #   any_empty: same as above, except the directory must be empty
 
   local dir_to_check=$2
   local checktype=$3
@@ -298,9 +299,20 @@ get_first_available_dir() {
        # dir exists and is not mounted; use it as-is ("any" is requested)
       n=""
     elif [ -d "${dir_to_check}" ] &&
+         [ "${checktype}" = "any_empty" ] &&
+         [ ! "$(ls -A $dir_to_check)" ] &&
+         [ "${dir_to_check_mounted}" = "false" ]; then
+      # for mountpoints ("any_empty" requested): dir exists, is empty, and is not mounted
+      n=""
+    elif [ -d "${dir_to_check}" ] &&
          [ "${checktype}" = "any" ] &&
          [ "${dir_to_check_mounted}" = "true" ]; then
-      # dir exists but is mounted, increment!
+      # dir exists but is mounted -> increment!
+      n=2
+    elif [ -d "${dir_to_check}" ] &&
+         [ "${checktype}" = "any_empty" ] &&
+         [ "$(ls -A $dir_to_check)" || "${dir_to_check_mounted}" = "true" ]; then
+      # for mountpoints ("any_empty" is requested): dir exists, but either is not empty or is mounted -> increment!
       n=2
     else # this server "any" that wasn't matched as well as "new"
       # dir or file of the same name exists and "new" is requested -> increment!
@@ -902,18 +914,18 @@ done
 
 # VAULT MOUNTPOINT
 if [ "$current_user" = "root" ]; then
-  suggested_mountpoint_dir=/mnt/cryptovault
-  get_first_available_dir suggested_mountpoint_dir $suggested_mountpoint_dir "any"
+  initial_suggested_mountpoint_dir=/mnt/cryptovault
+  get_first_available_dir suggested_mountpoint_dir $initial_suggested_mountpoint_dir "any_empty"
   mountpoint_example="\nSuggested system-wide mountpoint location: ${suggested_mountpoint_dir}"
 else
-  suggested_mountpoint_dir=${HOME}/cryptovault
-  get_first_available_dir suggested_mountpoint_dir $suggested_mountpoint_dir "any"
+  initial_suggested_mountpoint_dir=${HOME}/cryptovault
+  get_first_available_dir suggested_mountpoint_dir $initial_suggested_mountpoint_dir "any_empty"
   mountpoint_example="\nSuggested mountpoint location: ${suggested_mountpoint_dir}"
 fi
 
 while true; do
   dialog --title "Mountpoint selection" --msgbox "\nOn the next screen select the location where you want the vault to be mounted when opened. 
-If this is a system-wide vault, use a path under /mnt/. For a personal vault, select a mountpoint under a home directory.\n\n
+If this is a system-wide vault, use a path under /mnt/. For a personal vault, select a mountpoint directory under a home directory.\n\n
 NOTE: Use Up/Dn [arrow] to move to move the selector, SPACE to copy selected directory to the edit line, and ENTER to accept the current path in the edit box. 
 To move to subdir/parent, add/remove \"/\" after the directory name on the edit line.\n\n
 NOTE: If a non-existent path is entered, the directory/directories will be created. Existing but non-empty directories are not accepted. This directory can not be used for other purposes.\n\n
@@ -1009,6 +1021,8 @@ vaultpath_owner_home=$(getent passwd ${vaultpath_owner} | cut -d: -f6)
 #TODO: Allow selection of the directory-to-be-created,
 #      but REQUIRE a previously non-existing directory ("new")
 #      TO BE CREATED, then confirm that directory doesn't exist
+
+#TODO: same process as for the vaultfile home selection!
 
 # CRYPTO VAULT COMMAND DIRECTORY PARENT
 if [ "$vaultpath_owner" = "root" ]; then
