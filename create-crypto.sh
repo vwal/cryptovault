@@ -293,26 +293,32 @@ get_first_available_dir() {
   else
     check_mounted dir_to_check_mounted ${dir_to_check}
 
+#TODO: When two or more dirs are being created, "ls -A" of course doesn't work as initially thought :-/
+
     if [ -d "${dir_to_check}" ] &&
        [ "${checktype}" = "any" ] &&
        [ "${dir_to_check_mounted}" = "false" ]; then
        # dir exists and is not mounted; use it as-is ("any" is requested)
       n=""
-    elif [ -d "${dir_to_check}" ] &&
-         [ "${checktype}" = "any_empty" ] &&
+    elif [ "${checktype}" = "any_empty" ] &&
+         [ -d "${dir_to_check}" ] &&
          [ ! "$(ls -A $dir_to_check)" ] &&
          [ "${dir_to_check_mounted}" = "false" ]; then
-      # for mountpoints ("any_empty" requested): dir exists, is empty, and is not mounted
+      # dir exists, is empty, and is not mounted
       n=""
+    elif [ "${checktype}" = "any_empty" ] && 
+         [ ! -d "${dir_to_check}" ]; then
+      # dir does not exist (hence it is empty, and is not mounted)
+      n="" 
     elif [ -d "${dir_to_check}" ] &&
          [ "${checktype}" = "any" ] &&
          [ "${dir_to_check_mounted}" = "true" ]; then
       # dir exists but is mounted -> increment!
       n=2
-    elif [ -d "${dir_to_check}" ] &&
-         [ "${checktype}" = "any_empty" ] &&
-         [ "$(ls -A $dir_to_check)" || "${dir_to_check_mounted}" = "true" ]; then
-      # for mountpoints ("any_empty" is requested): dir exists, but either is not empty or is mounted -> increment!
+    elif [ "${checktype}" = "any_empty" ] &&
+         [ -d "${dir_to_check}" ] &&
+         [[ (! "$(ls -A $dir_to_check)") || ("${dir_to_check_mounted}" = "true") ]]; then
+      # dir exists, but either is not empty or is mounted -> increment!
       n=2
     else # this server "any" that wasn't matched as well as "new"
       # dir or file of the same name exists and "new" is requested -> increment!
@@ -593,7 +599,7 @@ cleanup() {
 # exit before the action begins
 early_exit() {
 
-  dialog --title "Confirm script termination" --yesno "\nAre you sure you want to exit the crypt vault creation process?" 7 70
+  dialog --title "Confirm script termination" --yesno "\nAre you sure you want to exit the crypt vault creation process?" 8 70
   _ret=$?
 
   case ${_ret} in
@@ -654,7 +660,7 @@ fi
 # FILE SYSTEM SELECTION
 while true; do
   SELECT_CRYPTO_FS=$(dialog --title "Select crypto vault file system" --radiolist "\nSelect the file system for the encrypted vault.\nZFS is recommended for multiple reasons.\n\n
-NOTE: Highlight the choice with up/down arrow, select with SPACE." 20 55 2 \
+NOTE: Highlight the choice with up/down arrow, select with SPACE." 16 55 2 \
             1 zfs on \
             2 ext4 off \
           2>&1 > /dev/tty)
@@ -718,13 +724,13 @@ while true; do
   if [ "${CRYPT_PASS_SEL_1}" = "${CRYPT_PASS_SEL_2}" ]; then
 
     if [ "${CRYPT_PASS_SEL_1}" = "" ]; then
-      dialog --title "ERROR" --msgbox "\nAn empty passphrase is not allowed!\n\nPlease try again!" 9 30
+      dialog --title "ERROR" --msgbox "\nAn empty passphrase is not allowed!\n\nPlease try again!" 10 40
     else 
       CRYPTPWD=$CRYPT_PASS_SEL_1
       break
     fi
   else
-    dialog --title "ERROR" --msgbox "\nPASSPHRASES DO NOT MATCH!!\n\nPlease try again!" 9 30
+    dialog --title "ERROR" --msgbox "\nPASSPHRASES DO NOT MATCH!!\n\nPlease try again!" 10 40
   fi
 done
 
@@ -779,10 +785,9 @@ while true; do
   dialog --title "Vault file location selection" --msgbox "\nOn the next screen select the location where you want the vault file to be saved. 
 If this is a system-wide vault, use a path, for example, under /var/ (such as /var/vaultfiles). For a personal vault, select a location under a home directory (e.g. /home/alice/vaultfiles).\n\n
 NOTE: In this step you will select the directory where the vault file is saved. In the next step you will select the vault file name/label.\n\n
-NOTE: Use Up/Dn [arrow] to move to move the selector, SPACE to copy selected directory to the edit line, and ENTER to accept the current path in the edit box. 
-To move to subdir/parent, add/remove \"/\" after the directory name on the edit line.\n\n
+NOTE: Use Up/Dn [arrow] to move to move the selector, SPACE to copy selected directory to the edit line, and ENTER to accept the current path in the edit box. To move to subdir/parent, add/remove \"/\" after the directory name on the edit line.\n\n
 NOTE: If a previously non-existing path is entered, the directory/directories will be created. To accept the suggested path, just hit Enter on the next screen..\n\n
-${vaulthome_example}" 25 75
+${vaulthome_example}" 26 78
 
   VAULTFILE_HOME=$(dialog --title "Vault file location selection" --dselect ${suggested_vaultfile_dir} 16 60 2>&1 > /dev/tty)
   _ret=$?
@@ -826,7 +831,7 @@ ${vaulthome_example}" 25 75
     vaultpath_exists="false"
   fi
 
-  dialog --title "Confirm selected vault file location" --yesno "\nYou selected vault file location:\n\n${VAULTFILE_HOME}\n\n${path_creation_info}\n\n${vaulthome_owner_info}Is this what you want?" 16 70
+  dialog --title "Confirm selected vault file location" --yesno "\nYou selected vault file location:\n\n${VAULTFILE_HOME}\n\n${path_creation_info}\n\n${vaulthome_owner_info}Is this what you want?" 14 70
   _ret=$?
   
   case ${_ret} in
@@ -846,7 +851,7 @@ vaultlabel_example="\nSuggested vault label: ${suggested_vault_label}"
 
 while true; do
   CRYPTOVAULT_LABEL_INPUT=$(dialog --title "Crypto Vault Label/File Name" --inputbox "\nEnter the desired crypto vault label (no spaces). It will also be used as the crypto vault file name.\n\n
-NOTE: Since the crypto vaults are mapped through /dev/mapper system-wide (even when access is limited to a specific user), the label must be unique on the system.\n
+NOTE: Since the crypto vaults are mapped through /dev/mapper system-wide (even when access is limited to a specific user), the label must be unique on the system.\n\n
 NOTE: To accept the default/suggestion, just hit ENTER\n" 17 70 "${suggested_vault_label}" 2>&1 > /dev/tty)
   _ret=$?
 
@@ -910,8 +915,6 @@ NOTE: To accept the default/suggestion, just hit ENTER\n" 17 70 "${suggested_vau
 
 done
 
-#TODO: same process as for the vaultfile home selection!
-
 # VAULT MOUNTPOINT
 if [ "$current_user" = "root" ]; then
   initial_suggested_mountpoint_dir=/mnt/cryptovault
@@ -926,12 +929,11 @@ fi
 while true; do
   dialog --title "Mountpoint selection" --msgbox "\nOn the next screen select the location where you want the vault to be mounted when opened. 
 If this is a system-wide vault, use a path under /mnt/. For a personal vault, select a mountpoint directory under a home directory.\n\n
-NOTE: Use Up/Dn [arrow] to move to move the selector, SPACE to copy selected directory to the edit line, and ENTER to accept the current path in the edit box. 
-To move to subdir/parent, add/remove \"/\" after the directory name on the edit line.\n\n
+NOTE: Use Up/Dn [arrow] to move to move the selector, SPACE to copy selected directory to the edit line, and ENTER to accept the current path in the edit box. To move to subdir/parent, add/remove \"/\" after the directory name on the edit line.\n\n
 NOTE: If a non-existent path is entered, the directory/directories will be created. Existing but non-empty directories are not accepted. This directory can not be used for other purposes.\n\n
-NOTE: Global locations (e.g. /mnt/mountdir) are set up for root access, while user-owned locations (e.g. /home/alice/mountdir) are set up for the owner of the parent dir (i.e. \"alice\" in this example).\n
+NOTE: Global locations (e.g. /mnt/cryptovault) are set up for root access, while user-owned locations (e.g. /home/alice/cryptovault) are set up for the owner of the parent dir (i.e. \"alice\" in this example).\n\n
 NOTE: To accept the suggested mountpoint, just hit Enter on the next screen.\n\n
-${mountpoint_example}" 27 80
+${mountpoint_example}" 28 85
 
   MOUNTPOINT=$(dialog --title "Mountpoint selection" --dselect ${suggested_mountpoint_dir} 16 60 2>&1 > /dev/tty)
   _ret=$?
@@ -1000,7 +1002,7 @@ ${mountpoint_example}" 27 80
   fi
 
   if [ "$confirm" = "true" ]; then
-    dialog --title "Confirm selected mountpoint" --yesno "\n${different_owners_WARNING}You selected mountpoint path:\n\n${MOUNTPOINT}\n\n${mountpoint_selection_info}\n\n${mountpoint_owner_info}Is this what you want?" 22 75
+    dialog --title "Confirm selected mountpoint" --yesno "\n${different_owners_WARNING}You selected mountpoint path:\n\n${MOUNTPOINT}\n\n${mountpoint_selection_info}\n\n${mountpoint_owner_info}Is this what you want?" 15 75
     _ret=$?
   
     case ${_ret} in
@@ -1018,33 +1020,29 @@ done
 
 vaultpath_owner_home=$(getent passwd ${vaultpath_owner} | cut -d: -f6)
 
-#TODO: Allow selection of the directory-to-be-created,
-#      but REQUIRE a previously non-existing directory ("new")
-#      TO BE CREATED, then confirm that directory doesn't exist
-
-#TODO: same process as for the vaultfile home selection!
-
-# CRYPTO VAULT COMMAND DIRECTORY PARENT
+# CRYPTO VAULT COMMAND DIRECTORY (require an empty, or previuosly non-existing directory)
 if [ "$vaultpath_owner" = "root" ]; then
-  commanddir_parent_example="\nSuggested system-wide command directory parent: /usr/bin or /opt (or /root if this is a vault for the root user)"
+  initial_suggested_command_dir="/usr/local/bin/${CRYPTOVAULT_LABEL}-commands"
+  get_first_available_dir suggested_command_dir $initial_suggested_command_dir "any_empty_command"
+  commanddir_example="Suggested system-wide command directory: ${suggested_command_dir} (or use \"/root/${suggested_command_dir}\" if this is a vault for the root user)"
 else
-  commanddir_parent_example="\nSuggested command directory parent (the home directory of the crypto vault owner based on the vault file location): ${vaultpath_owner_home}"
+  initial_suggested_command_dir="${vaultpath_owner_home}/bin/${CRYPTOVAULT_LABEL}-commands"
+  get_first_available_dir suggested_command_dir $initial_suggested_command_dir "any_empty_command"
+  commanddir_example="Suggested command directory (the home directory of the crypto vault owner is based on the vault file location): ${suggested_command_dir}"
 fi
 
 while true; do
-  dialog --title "Command directory PARENT location selection" --msgbox "\nOn the next screen select the *PARENT* directory where you want the crypto vault command directory (\"${CRYPTOVAULT_LABEL}-commands\") to be created.\n\n
-If this is a system-wide vault, select /opt or /usr/bin for the parent (a directory for the command files will be created below it). For a personal vault, the home directory of the vault file owner is recommended.\n\n
+  dialog --title "Command directory selection" --msgbox "\nOn the next screen select the directory where you want the crypto vault command scripts to be reside.\n\n
+If this is a system-wide vault, select a location under \"/opt\" or \"/usr/local/bin\". For a personal vault, a location under the vault file owner's home directory (\"${vaultpath_owner_home}\") is recommended.\n\n
 NOTE: When a user directory is selected, the vault mount/unmount commands are made executable by the user who owns the selected parent. When a system location (or /root) is selected, the vault mount/unmount commands are made executable only by the root user, and hence the non-privileged users must use sudo to execute them. The generated commands can be moved to a different location (they use absolute paths).\n\n
-NOTE: Use Up/Dn [arrow] to move to move the selector, SPACE to copy selected directory to the edit line, and ENTER to accept the current path in the edit box. 
-To move to subdir/parent, add/remove \"/\" after the directory name on the edit line.\n\n
-NOTE: This directory location must exist; you may not define a non-existing path!\n\n
-${commanddir_parent_example}" 30 90
+NOTE: Use Up/Dn [arrow] to move to move the selector, SPACE to copy selected directory to the edit line, and ENTER to accept the current path in the edit box. To move to subdir/parent, add/remove \"/\" after the directory name on the edit line.\n\n
+${commanddir_example}" 26 90
 
-  COMMANDDIR_PARENT=$(dialog --title "Command directory PARENT location selection" --dselect ${vaultpath_owner_home}/ 16 60 2>&1 > /dev/tty)
+  CRYPTOVAULT_COMMANDDIR=$(dialog --title "Command directory selection" --dselect ${suggested_command_dir} 16 60 2>&1 > /dev/tty)
   _ret=$?
 
   #remove slash from the end if there is one
-  COMMANDDIR_PARENT=${COMMANDDIR_PARENT%/}
+  CRYPTOVAULT_COMMANDDIR=${CRYPTOVAULT_COMMANDDIR%/}
   
   case ${_ret} in
     0)
@@ -1053,21 +1051,8 @@ ${commanddir_parent_example}" 30 90
       early_exit && continue;;
   esac
 
-  find_existing_parent commanddir_existing_parent $COMMANDDIR_PARENT
-
-  if [ "${COMMANDDIR_PARENT}" != "${commanddir_existing_parent}" ]; then
-    dialog --title "ERROR" --msgbox "\nThe selected parent directory must exist! Please select an existing directory where the command directory will be created." 14 50
-    continue  
-  fi
-
-  CRYPTOVAULT_COMMANDDIR="${COMMANDDIR_PARENT}/${CRYPTOVAULT_LABEL}-commands"
-
-  if [ -e "${CRYPTOVAULT_COMMANDDIR}" ]; then
-    dialog --title "ERROR" --msgbox "\nThe directory you selected already contains a file or directory with the name of the command directory (\"${CRYPTOVAULT_LABEL}-commands\"). Please select a different parent directory, or remove the existing file/directory \"${CRYPTOVAULT_LABEL}-commands\" from the selected parent directory, and then try again." 14 70
-    continue  
-  fi
-
-  find_dir_owner commanddir_parent_owner $COMMANDDIR_PARENT
+  find_existing_parent commanddir_existing_parent $CRYPTOVAULT_COMMANDDIR
+  find_dir_owner commanddir_parent_owner $commanddir_existing_parent
 
   different_owners_WARNING=""
   if [ "$commanddir_parent_owner" != "$vaultpath_owner" ]; then
@@ -1085,8 +1070,8 @@ ${commanddir_parent_example}" 30 90
     command_fileop_sudoreq="false"
   fi
 
-  if [ "$COMMANDDIR_PARENT" = "$MOUNTPOINT" ]; then
-    dialog --title "ERROR" --msgbox "\nThe mountpoint directory may not be the parent for the command directory; the mountpoint directory must always remain empty. Select another directory for the command directory parent." 14 50
+  if [ "$CRYPTOVAULT_COMMANDDIR" = "$MOUNTPOINT" ]; then
+    dialog --title "ERROR" --msgbox "\nThe command directory may not be the same as the mountpoint directory you selected earlier! The mountpoint directory must always remain empty. Please select another directory for the vault command scripts." 14 50
     continue
 
   else      
@@ -1099,7 +1084,7 @@ ${commanddir_parent_example}" 30 90
       fi
     fi
 
-    dialog --title "Confirm the selected command directory location" --yesno "\n${different_owners_WARNING}The full path of the command directory to be created:\n\n${CRYPTOVAULT_COMMANDDIR}\n\nNOTE: The command directory to be created is derived from the parent path you just selected + the vault name + the extension \"-commands\".\n\n${commanddir_owner_info}Is this what you want?" 18 75
+    dialog --title "Confirm the selected command directory location" --yesno "\n${different_owners_WARNING}The full path of the vault command directory:\n\n${CRYPTOVAULT_COMMANDDIR}\n\n${commanddir_owner_info}Is this what you want?" 14 75
     _ret=$?
   
     case ${_ret} in
@@ -1113,14 +1098,14 @@ ${commanddir_parent_example}" 30 90
 
 done
 
-dialog --title "Confirm to proceed" --yesno "\nIf you proceed, the encrypted vault will be created with the following parameters you have entered:\n\n
-Vault filesystem: ${CRYPTOVAULT_FS}\n
-Vault size: ${VAULTSIZEVAL}${VAULTSIZEUNIT}\n
-Vault label: ${CRYPTOVAULT_LABEL}\n
-Vault file path: ${VAULTFILE_FQFN} (owned by ${vaultpath_owner})\n
-Vault mount path: ${MOUNTPOINT} (owned by ${mountpath_owner})\n
-Vault command file path: ${CRYPTOVAULT_COMMANDDIR} (owned by ${commanddir_parent_owner})\n\n
-If the values are not correct, cancel and run the script again.\n\nDo you want to proceed?" 25 90
+dialog --title "Confirm to start crypto vault creation" --yesno "\nIf you proceed, the encrypted vault will be created with the following parameters you have entered:\n\n
+Vault filesystem........: ${CRYPTOVAULT_FS}\n
+Vault size..............: ${VAULTSIZEVAL}${VAULTSIZEUNIT}\n
+Vault label.............: ${CRYPTOVAULT_LABEL}\n
+Vault file path.........: ${VAULTFILE_FQFN} (owned by ${vaultpath_owner})\n
+Vault mount path........: ${MOUNTPOINT} (owned by ${mountpath_owner})\n
+Vault command file path.: ${CRYPTOVAULT_COMMANDDIR} (owned by ${commanddir_parent_owner})\n\n
+If the values are not correct, cancel and run the script again.\n\nDo you want to proceed?" 19 110
 _ret=$?
   
 case ${_ret} in
