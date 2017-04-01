@@ -565,7 +565,7 @@ cleanup() {
     fi
 
     if [ ! -d $CRYPTOVAULT_COMMANDDIR ]; then
-      echo "There were no command files to remove."
+      echo "There were no command scripts to remove."
             
     elif [ -d $CRYPTOVAULT_COMMANDDIR ]; then
 
@@ -576,10 +576,11 @@ cleanup() {
         sudoit _ret rm -rf "$CRYPTOVAULT_COMMANDDIR"      
       fi
 
+#TODO: This has to be conditionalized because now "ANY_EMPTY" directory is allowed, and so an empty dir is not necessarily created by this process.
       if [ ${_ret} -ne 0 ]; then
-        echo "Unable to remove the command file directory \"$CRYPTOVAULT_COMMANDDIR\"."
+        echo "Unable to remove the command script directory \"$CRYPTOVAULT_COMMANDDIR\"."
       else
-        echo "Command file directory \"$CRYPTOVAULT_COMMANDDIR\" removed (it and the command files within were created during this process)."
+        echo "Command file directory \"$CRYPTOVAULT_COMMANDDIR\" removed (it and the command scripts within were created during this process)."
       fi
     fi
 
@@ -610,7 +611,7 @@ early_exit() {
 # clean exit
 exit_info() {
   echo
-  echo "Please use the \"mount-${CRYPTOVAULT_LABEL}\" and \"umount-${CRYPTOVAULT_LABEL}\" command files at ${CRYPTOVAULT_COMMANDDIR} to mount and dismount your newly created crypto vault \"${CRYPTOVAULT_LABEL}\"."
+  echo "Please use the \"mount-${CRYPTOVAULT_LABEL}\" and \"umount-${CRYPTOVAULT_LABEL}\" command scripts at ${CRYPTOVAULT_COMMANDDIR} to mount and dismount your newly created crypto vault \"${CRYPTOVAULT_LABEL}\"."
   echo
   
   exit 0
@@ -1067,6 +1068,14 @@ ${commanddir_example}" 26 90
     command_fileop_sudoreq="false"
   fi
 
+  path_creation_info=""
+  commanddir_exists="true"
+
+  if [ ! -d "$CRYPTOVAULT_COMMANDDIR" ]; then
+    path_creation_info="This directory does not exist; it will be created."
+    commanddir_exists="false"
+  fi
+
   if [ "$CRYPTOVAULT_COMMANDDIR" = "$MOUNTPOINT" ]; then
     dialog --title "ERROR" --msgbox "\nThe command directory may not be the same as the mountpoint directory you selected earlier! The mountpoint directory must always remain empty. Please select another directory for the vault command scripts." 14 50
     continue
@@ -1095,16 +1104,16 @@ ${commanddir_example}" 26 90
 
 done
 
-#TODO: Offer to symlink command files onto PATH
+#TODO: Offer to symlink command scripts onto PATH
 
 dialog --title "Confirm to start crypto vault creation" --yesno "\nIf you proceed, the encrypted vault will be created with the following parameters you have entered:\n\n
-Vault filesystem........: ${CRYPTOVAULT_FS}\n
-Vault size..............: ${VAULTSIZEVAL}${VAULTSIZEUNIT}\n
-Vault label.............: ${CRYPTOVAULT_LABEL}\n
-Vault file path.........: ${VAULTFILE_FQFN} (owned by ${vaultpath_owner})\n
-Vault mount path........: ${MOUNTPOINT} (owned by ${mountpath_owner})\n
-Vault command file path.: ${CRYPTOVAULT_COMMANDDIR} (owned by ${commanddir_parent_owner})\n\n
-If the values are not correct, cancel and run the script again.\n\nDo you want to proceed?" 19 110
+Vault filesystem...........: ${CRYPTOVAULT_FS}\n
+Vault size.................: ${VAULTSIZEVAL}${VAULTSIZEUNIT}\n
+Vault label................: ${CRYPTOVAULT_LABEL}\n
+Vault file path............: ${VAULTFILE_FQFN} (owned by ${vaultpath_owner})\n
+Vault mount path...........: ${MOUNTPOINT} (owned by ${mountpath_owner})\n
+Vault command script path..: ${CRYPTOVAULT_COMMANDDIR} (owned by ${commanddir_parent_owner})\n\n
+If the values are not correct, select \"NO\", and run the script again.\n\nDo you want to proceed?" 19 110
 _ret=$?
   
 case ${_ret} in
@@ -1331,20 +1340,29 @@ if [ ! -d ${SCRIPT_DIR}/_stubs ] ||
   cleanup 
 fi
 
-echo -e "\e${BIWhite}Creating the vault command script directory...\e${Color_Off}"
-executable="mkdir ${CRYPTOVAULT_COMMANDDIR}"
-if [ "$command_fileop_sudoreq" = "false" ]; then
-  echo -e "${executing}: $executable"
-  eval $executable 2>/dev/null
-  _ret=$?
-else
-  echo -e "${executing}$elevated: $executable"
-  sudoit _ret $executable
-fi
-
-if [ ${_ret} -ne 0 ]; then
-  echo "Unable to create the vault command directory. Aborting."
-  cleanup
+# create command script directory
+commanddir_creation_error="false"
+if [ "$commanddir_exists" = "false" ]; then
+  echo -e "\e${BIWhite}Creating command script directory...\e${Color_Off}"
+  executable="mkdir ${CRYPTOVAULT_COMMANDDIR}"
+  if [ "$command_fileop_sudoreq" = "false" ]; then
+    echo -e "$executing: $executable"
+    eval $executable 2>/dev/null
+    _ret=$?
+  else
+    echo -e "${executing}$elevated (as $commanddir_parent_owner): $executable"
+    sudoitas _ret $commanddir_parent_owner $executable
+  fi
+  if [ ${_ret} -ne 0 ]; then
+    commanddir_creation_error="true"
+  fi
+ 
+  # test commanddir creation
+  if [ "$commanddir_creation_error" = "true" ] ||
+     [ ! -d "$CRYPTOVAULT_COMMANDDIR" ]; then
+    echo -e "\e${BWhite}\e${On_Red}Could not create command script directory \"${CRYPTOVAULT_COMMANDDIR}\". Unable to proceed.\e${Color_Off}"
+    cleanup
+  fi
 fi
 
 echo -e "\e${BIWhite}Copying the vault command script stubs...\e${Color_Off}"
@@ -1408,7 +1426,7 @@ tmpfile=$(mktemp /tmp/tmp.XXXXXX)
 exec 3>"$tmpfile"
 rm "$tmpfile"
 
-echo -e "\e${BIWhite}Adding the vault-specific configuration variables to the command script stubs...\e${Color_Off}"
+echo -e "\n\e${BIWhite}Adding the vault-specific configuration variables to the command script stubs...\e${Color_Off}"
 
 # NOTE: The non-standard code indentation on the following items is intentional; do not modify it!
 
@@ -1493,6 +1511,8 @@ echo -e "${executing}$elevated: $executable"
 sudoit _ret $executable
 
 if [ ${_ret} -eq 0 ]; then
+  echo "Vault command directory/script owner set."
+else
   echo "Unable to set the correct owner for the vault command directory/scripts. Aborting."
   cleanup
 fi
@@ -1504,6 +1524,8 @@ echo -e "${executing}$elevated: $executable"
 sudoit _ret $executable
 
 if [ ${_ret} -eq 0 ]; then
+  echo "Vault command directory/script permissions set."
+else
   echo "Unable to set the necessary permissions for the vault command directory/scripts. Aborting."
   cleanup
 fi
@@ -1511,6 +1533,7 @@ fi
 # MAIN LOGIC: PROCESS COMPLETED; WRAPPING UP =================================
 
 # confirm to keep the vault (the final option to fully bail out)
+echo
 echo -n "Crypto vault \"${CRYPTOVAULT_LABEL}\" has been created. Keep this new vault (y/n)? "
 old_stty_cfg=$(stty -g)
 stty raw -echo
