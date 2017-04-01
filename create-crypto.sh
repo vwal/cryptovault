@@ -278,7 +278,6 @@ get_first_available_dir() {
   # $1 is the retval (_ret)
   # $2 is the dir to check
   # $3 modifies the check behavior:
-  #   new: increment [named] if existing
   #   any: offer first available [named] directory (including existing if not mounted); new if no directory exists
   #   any_empty: same as above, except the directory must be empty
 
@@ -293,34 +292,32 @@ get_first_available_dir() {
   else
     check_mounted dir_to_check_mounted ${dir_to_check}
 
-#TODO: When two or more dirs are being created, "ls -A" of course doesn't work as initially thought :-/
-
-    if [ -d "${dir_to_check}" ] &&
-       [ "${checktype}" = "any" ] &&
+    if [ "${checktype}" = "any" ] &&
+       [ -d "${dir_to_check}" ] &&
        [ "${dir_to_check_mounted}" = "false" ]; then
-       # dir exists and is not mounted; use it as-is ("any" is requested)
+       # "ANY": dir exists and is not mounted -> use it as-is
       n=""
     elif [ "${checktype}" = "any_empty" ] &&
          [ -d "${dir_to_check}" ] &&
          [ ! "$(ls -A $dir_to_check)" ] &&
          [ "${dir_to_check_mounted}" = "false" ]; then
-      # dir exists, is empty, and is not mounted
+      # "ANY_EMPTY": dir exists, is empty, and is not mounted -> use as-is
       n=""
     elif [ "${checktype}" = "any_empty" ] && 
          [ ! -d "${dir_to_check}" ]; then
-      # dir does not exist (hence it is empty, and is not mounted)
+      # "ANY_EMPTY": dir does not exist (hence it is empty, and is not mounted) -> use as-is
       n="" 
-    elif [ -d "${dir_to_check}" ] &&
-         [ "${checktype}" = "any" ] &&
+    elif [ "${checktype}" = "any" ] &&
+         [ -d "${dir_to_check}" ] &&
          [ "${dir_to_check_mounted}" = "true" ]; then
-      # dir exists but is mounted -> increment!
+      # "ANY": dir exists but is mounted -> increment!
       n=2
     elif [ "${checktype}" = "any_empty" ] &&
          [ -d "${dir_to_check}" ] &&
          [[ (! "$(ls -A $dir_to_check)") || ("${dir_to_check_mounted}" = "true") ]]; then
-      # dir exists, but either is not empty or is mounted -> increment!
+      # "ANY_EMPTY": dir exists, but either is not empty or is mounted -> increment!
       n=2
-    else # this server "any" that wasn't matched as well as "new"
+    else # this serves "any" that wasn't matched, as well as "new"
       # dir or file of the same name exists and "new" is requested -> increment!
       n=2
     fi
@@ -1023,11 +1020,11 @@ vaultpath_owner_home=$(getent passwd ${vaultpath_owner} | cut -d: -f6)
 # CRYPTO VAULT COMMAND DIRECTORY (require an empty, or previuosly non-existing directory)
 if [ "$vaultpath_owner" = "root" ]; then
   initial_suggested_command_dir="/usr/local/bin/${CRYPTOVAULT_LABEL}-commands"
-  get_first_available_dir suggested_command_dir $initial_suggested_command_dir "any_empty_command"
+  get_first_available_dir suggested_command_dir $initial_suggested_command_dir "any_empty"
   commanddir_example="Suggested system-wide command directory: ${suggested_command_dir} (or use \"/root/${suggested_command_dir}\" if this is a vault for the root user)"
 else
   initial_suggested_command_dir="${vaultpath_owner_home}/bin/${CRYPTOVAULT_LABEL}-commands"
-  get_first_available_dir suggested_command_dir $initial_suggested_command_dir "any_empty_command"
+  get_first_available_dir suggested_command_dir $initial_suggested_command_dir "any_empty"
   commanddir_example="Suggested command directory (the home directory of the crypto vault owner is based on the vault file location): ${suggested_command_dir}"
 fi
 
@@ -1097,6 +1094,8 @@ ${commanddir_example}" 26 90
   fi
 
 done
+
+#TODO: Offer to symlink command files onto PATH
 
 dialog --title "Confirm to start crypto vault creation" --yesno "\nIf you proceed, the encrypted vault will be created with the following parameters you have entered:\n\n
 Vault filesystem........: ${CRYPTOVAULT_FS}\n
