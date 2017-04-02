@@ -2,6 +2,12 @@
 
 trap "early_exit" INT TERM
 
+if [ "$1" = "debug" ]; then
+  debug_me="true"
+else
+  debug_me="false"
+fi
+
 # COLOR DEFINITIONS ==========================================================
 
 # Reset
@@ -338,7 +344,7 @@ get_first_available_dir() {
 
         # prepare for the next iteration
         dir_is_mounted="false"
-        n++
+        ((n++))
 
       done
     fi
@@ -374,7 +380,7 @@ get_first_available_file() {
       fi
 
       # prepare for the next iteration
-      n++
+      ((n++))
     done
 
   fi
@@ -523,12 +529,15 @@ cleanup() {
     elif [ -d $VAULTFILE_HOME ] &&
        [ "$vaultpath_exists" = "false" ] &&
        [ ! "$(ls -A $VAULTFILE_HOME)" ]; then
+
+#TODO: currently ~/vaultfiles/myvaults/ gets removed.. but what if ~/vaultfiles/otherdir/ existed!!
+#      must establish the first created dir and remove from there down!
      
       if [ "$vault_fileop_sudoreq" = "false" ]; then
-        rmdir "$VAULTFILE_HOME"
+        rmd -rf "$VAULTFILE_HOME"
         _ret=$?
       else
-        sudoit _ret rmdir "$VAULTFILE_HOME"      
+        sudoit _ret rm -rf "$VAULTFILE_HOME"      
       fi
 
       if [ ${_ret} -ne 0 ]; then
@@ -564,11 +573,53 @@ cleanup() {
       echo "Mountpoint directory was not created by this process. Leaving it intact."
     fi
 
-    if [ ! -d $CRYPTOVAULT_COMMANDDIR ]; then
-      echo "There were no command scripts to remove."
-            
-    elif [ -d $CRYPTOVAULT_COMMANDDIR ]; then
+    # remove the vault command scripts 
+    total_scripts_present=0
+    total_scripts_removed=0
+    scripts_to_remove=(
+      ${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}
+      ${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL}
+      ${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL}
+    )
+    
+    for script in "${scripts_to_remove[@]}"
+    do
+ 
+      if [ -f ${script} ]; then
+        ((total_scripts_present++))
+        
+        if [ "$command_fileop_sudoreq" = "false" ]; then
+          rm -f "${script}"
+          _ret=$?
+        else
+          sudoit _ret rm -f "${script}"
+        fi
+      fi
 
+      if [ ${_ret} -eq 0 ]; then
+        ((total_scripts_removed++))
+      fi
+
+    done
+
+    if [ $total_scripts_present -gt $total_scripts_removed ]; then
+      echo "Unable to remove all vault command scripts."
+    elif [ $total_scripts_present -eq $total_scripts_removed ]; then
+      echo "Vault command scripts removed."
+    else
+      echo "There were no vault command script to remove."
+    fi
+
+    # remove the vault command script directory
+    if [ ! -d $CRYPTOVAULT_COMMANDDIR ]; then
+      echo "There was no command script directory to remove."
+    elif [ -d $CRYPTOVAULT_COMMANDDIR ] &&
+       [ "$commanddir_exists" = "false" ] &&
+       [ ! "$(ls -A $CRYPTOVAULT_COMMANDDIR)" ]; then
+
+#TODO: currently ~/bin/commanddir gets removed.. but what if ~/bin/otherdir existed!!
+#      must establish the first created dir and remove from there down!
+     
       if [ "$command_fileop_sudoreq" = "false" ]; then
         rm -rf "$CRYPTOVAULT_COMMANDDIR"
         _ret=$?
@@ -576,12 +627,14 @@ cleanup() {
         sudoit _ret rm -rf "$CRYPTOVAULT_COMMANDDIR"      
       fi
 
-#TODO: This has to be conditionalized because now "ANY_EMPTY" directory is allowed, and so an empty dir is not necessarily created by this process.
       if [ ${_ret} -ne 0 ]; then
         echo "Unable to remove the command script directory \"$CRYPTOVAULT_COMMANDDIR\"."
       else
-        echo "Command file directory \"$CRYPTOVAULT_COMMANDDIR\" removed (it and the command scripts within were created during this process)."
+        echo "Command script directory \"$CRYPTOVAULT_COMMANDDIR\" removed (it was created during this process, and was now empty)."
       fi
+     
+    else
+      echo "Command script directory was not created by this process. Leaving it intact."
     fi
 
     echo
@@ -827,6 +880,8 @@ ${vaulthome_example}" 26 78
   if [ ! -d "$VAULTFILE_HOME" ]; then
     path_creation_info="This directory does not exist; it will be created."
     vaultpath_exists="false"
+  else
+    path_creation_info="Using an existing directory."
   fi
 
   dialog --title "Confirm selected vault file location" --yesno "\nYou selected vault file location:\n\n${VAULTFILE_HOME}\n\n${path_creation_info}\n\n${vaulthome_owner_info}Is this what you want?" 14 70
@@ -1127,6 +1182,11 @@ esac
 
 clear 
 
+# enable for creation process debug
+if [ "${debug_me}" = "true" ]; then
+  set -x
+fi
+
 echo
 
 trap - INT TERM
@@ -1344,7 +1404,7 @@ fi
 commanddir_creation_error="false"
 if [ "$commanddir_exists" = "false" ]; then
   echo -e "\e${BIWhite}Creating command script directory...\e${Color_Off}"
-  executable="mkdir ${CRYPTOVAULT_COMMANDDIR}"
+  executable="mkdir -p ${CRYPTOVAULT_COMMANDDIR}"
   if [ "$command_fileop_sudoreq" = "false" ]; then
     echo -e "$executing: $executable"
     eval $executable 2>/dev/null
