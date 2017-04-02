@@ -233,6 +233,8 @@ find_existing_parent() {
       paprev=$pa
       pa="$pa/${p[i++]}"
       if [[ ! -e $pa ]]; then
+        fep_result[0]=$paprev
+        fep_result[1]=$pa
         eval "$1=$paprev"
         break
       fi
@@ -530,14 +532,11 @@ cleanup() {
        [ "$vaultpath_exists" = "false" ] &&
        [ ! "$(ls -A $VAULTFILE_HOME)" ]; then
 
-#TODO: currently ~/vaultfiles/myvaults/ gets removed.. but what if ~/vaultfiles/otherdir/ existed!!
-#      must establish the first created dir and remove from there down!
-     
       if [ "$vault_fileop_sudoreq" = "false" ]; then
-        rmd -rf "$VAULTFILE_HOME"
+        rm -rf "$vaultpath_first_created"
         _ret=$?
       else
-        sudoit _ret rm -rf "$VAULTFILE_HOME"      
+        sudoit _ret rm -rf "$vaultpath_first_created"
       fi
 
       if [ ${_ret} -ne 0 ]; then
@@ -555,12 +554,12 @@ cleanup() {
     elif [ -d $MOUNTPOINT ] &&
        [ "$mountpoint_exists" = "false" ] &&
        [ ! "$(ls -A $MOUNTPOINT)" ]; then
-      
+
       if [ "$vault_fileop_sudoreq" = "false" ]; then
-        rmdir "$MOUNTPOINT"
+        rm -rf "$mountpath_first_created"
         _ret=$?
       else
-        sudoit _ret rmdir "$MOUNTPOINT"      
+        sudoit _ret rm -rf "$mountpath_first_created"
       fi
 
       if [ ${_ret} -ne 0 ]; then
@@ -617,14 +616,11 @@ cleanup() {
        [ "$commanddir_exists" = "false" ] &&
        [ ! "$(ls -A $CRYPTOVAULT_COMMANDDIR)" ]; then
 
-#TODO: currently ~/bin/commanddir gets removed.. but what if ~/bin/otherdir existed!!
-#      must establish the first created dir and remove from there down!
-     
       if [ "$command_fileop_sudoreq" = "false" ]; then
-        rm -rf "$CRYPTOVAULT_COMMANDDIR"
+        rm -rf "$commanddir_first_created"
         _ret=$?
       else
-        sudoit _ret rm -rf "$CRYPTOVAULT_COMMANDDIR"      
+        sudoit _ret rm -rf "$commanddir_first_created"
       fi
 
       if [ ${_ret} -ne 0 ]; then
@@ -854,7 +850,9 @@ ${vaulthome_example}" 26 78
   esac
 
   find_existing_parent vaultpath_existing_parent $VAULTFILE_HOME
-  find_dir_owner vaultpath_owner $vaultpath_existing_parent
+  find_dir_owner vaultpath_owner ${vaultpath_existing_parent}
+  # get this result array via a global set by find_existing_parent, called above
+  vaultpath_first_created=${fep_result[1]}
 
   vaulthome_owner_info=""
   if [ "$current_user" != "$vaultpath_owner" ]; then
@@ -1002,7 +1000,9 @@ ${mountpoint_example}" 28 85
   esac
 
   find_existing_parent mountpath_existing_parent $MOUNTPOINT
-  find_dir_owner mountpath_owner $mountpath_existing_parent
+  find_dir_owner mountpath_owner ${mountpath_existing_parent}
+  # get this result array via a global set by find_existing_parent, called above
+  mountpath_first_created=${fep_result[1]}
 
   different_owners_WARNING=""
   if [ "$vaultpath_owner" != "$mountpath_owner" ]; then
@@ -1105,7 +1105,9 @@ ${commanddir_example}" 26 90
   esac
 
   find_existing_parent commanddir_existing_parent $CRYPTOVAULT_COMMANDDIR
-  find_dir_owner commanddir_parent_owner $commanddir_existing_parent
+  find_dir_owner commanddir_parent_owner ${commanddir_existing_parent}
+  # get this result array via a global set by find_existing_parent, called above
+  commanddir_first_created=${fep_result[1]}
 
   different_owners_WARNING=""
   if [ "$commanddir_parent_owner" != "$vaultpath_owner" ]; then
