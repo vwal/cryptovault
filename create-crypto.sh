@@ -228,13 +228,17 @@ find_existing_parent() {
 
     pa=""
     max="${#p[@]}"
+    # record number of segments in the result array
+    fep_result[3]=$max
     i=0
     while (( i<"$max" )); do
       paprev=$pa
       pa="$pa/${p[i++]}"
       if [[ ! -e $pa ]]; then
-        fep_result[0]=$paprev
-        fep_result[1]=$pa
+        # record first existing parent in the result array
+        fep_result[1]=$paprev
+        # record first created segment in the result array
+        fep_result[2]=$pa
         eval "$1=$paprev"
         break
       fi
@@ -288,6 +292,7 @@ get_first_available_dir() {
   # $3 modifies the check behavior:
   #   any: offer first available [named] directory (including existing if not mounted); new if no directory exists
   #   any_empty: same as above, except the directory must be empty
+  #   new (or anything underfined): always increment from existing
 
   local dir_to_check=$2
   local checktype=$3
@@ -352,8 +357,10 @@ get_first_available_dir() {
     fi
 
   fi
-
-  eval "$1=${dir_to_check}${n}"
+  
+  fad[1]=${dir_to_check}${n}
+  fad[2]=$n
+  eval "$1=${fad[1]}"
 
 }
 
@@ -386,7 +393,10 @@ get_first_available_file() {
     done
 
   fi
-  eval "$1=${file_to_check}${n}"
+
+  faf[1]=${file_to_check}${n}
+  faf[2]=$n
+  eval "$1=${faf[1]}"
 
 }
 
@@ -704,6 +714,40 @@ fi
 
 # MAIN LOGIC: QUERY VAULT PARAMETERS =========================================
 
+# pre-increment suggested paths so that the label and the suggeted mountpoint
+# numbers aren't out of sync (i.e. "/mnt/cryptovault2" vs. "/var/vaultfiles/cryptovault3")
+
+if [ "$current_user" = "root" ]; then
+  initial_suggested_vaulthome_dir="/var/vaultfiles"
+  initial_suggested_vault_label="cryptovault"
+  initial_suggested_vaultfile_fqfn="${initial_suggested_vaulthome_dir}/${initial_suggested_vault_label}"
+  initial_suggested_mountpoint_dir="/mnt/cryptovault"
+else
+  initial_suggested_vaulthome_dir="${HOME}/vaultfiles"
+  initial_suggested_vault_label="${current_user}-cryptovault"
+  initial_suggested_vaultfile_fqfn="${initial_suggested_vaulthome_dir}/${initial_suggested_vault_label}"
+  initial_suggested_mountpoint_dir="${HOME}/mnt/cryptovault"
+fi
+
+if [ -e $initial_suggested_vaultfile_fqfn ] ||
+   [ -e $initial_suggested_mountpoint_dir ]; then
+
+  suggested_n=2
+  while true; do
+    testing_vaultfile_fqfn="${initial_suggested_vaultfile_fqfn}${suggested_n}"
+    testing_mountpoint_dir="${initial_suggested_mountpoint_dir}${suggested_n}"
+    if [ -e "${testing_vaultfile_fqfn}" ] ||
+       [ -e "${testing_mountpoint_dir}" ]; then
+      ((++suggested_n))
+    else
+      initial_suggested_vault_label="${initial_suggested_vault_label}${suggested_n}"
+      initial_suggested_mountpoint_dir="${initial_suggested_mountpoint_dir}${suggested_n}"
+      break
+    fi
+  done
+  
+fi
+
 # FILE SYSTEM SELECTION
 while true; do
   SELECT_CRYPTO_FS=$(dialog --title "Select crypto vault file system" --radiolist "\nSelect the file system for the encrypted vault.\nZFS is recommended for multiple reasons.\n\n
@@ -817,15 +861,13 @@ while true; do
 done
 
 # VAULT FILE LOCATION
+# $initial_suggested_vaulthome_dir comes from preincrement (double-checking here..)
+get_first_available_dir suggested_vaulthome_dir $initial_suggested_vaulthome_dir "any"
 
 if [ "$current_user" = "root" ]; then
-  initial_suggested_vaulthome_dir=/var/vaultfiles
-  get_first_available_dir suggested_vaulthome_dir $initial_suggested_vaulthome_dir "any"
   vaulthome_example="\nSuggested system-wide vault file location: $suggested_vaulthome_dir"
 else
-  initial_suggested_vaultfile_dir=${HOME}/vaultfiles
-  get_first_available_dir suggested_vaultfile_dir $initial_suggested_vaultfile_dir "any"
-  vaulthome_example="\nSuggested vault file location: ${suggested_vaultfile_dir}"
+  vaulthome_example="\nSuggested vault file location: ${suggested_vaulthome_dir}"
 fi
 
 while true; do
@@ -836,7 +878,7 @@ NOTE: Use Up/Dn [arrow] to move to move the selector, SPACE to copy selected dir
 NOTE: If a previously non-existing path is entered, the directory/directories will be created. To accept the suggested path, just hit Enter on the next screen..\n\n
 ${vaulthome_example}" 26 78
 
-  VAULTFILE_HOME=$(dialog --title "Vault file location selection" --dselect ${suggested_vaultfile_dir} 16 60 2>&1 > /dev/tty)
+  VAULTFILE_HOME=$(dialog --title "Vault file location selection" --dselect ${suggested_vaulthome_dir} 16 60 2>&1 > /dev/tty)
   _ret=$?
 
   #remove slash from the end if there is one
@@ -852,7 +894,7 @@ ${vaulthome_example}" 26 78
   find_existing_parent vaultpath_existing_parent $VAULTFILE_HOME
   find_dir_owner vaultpath_owner ${vaultpath_existing_parent}
   # get this result array via a global set by find_existing_parent, called above
-  vaultpath_first_created=${fep_result[1]}
+  vaultpath_first_created=${fep_result[2]}
 
   vaulthome_owner_info=""
   if [ "$current_user" != "$vaultpath_owner" ]; then
@@ -894,15 +936,14 @@ ${vaulthome_example}" 26 78
   
 done
 
-
 # VAULT LABEL/FILE NAME
-initial_suggested_vault_label=cryptovault
+# $initial_suggested_vault_label comes from preincrement (double-checking here with the selected home)
 get_first_available_file suggested_vault_label $initial_suggested_vault_label $VAULTFILE_HOME
 vaultlabel_example="\nSuggested vault label: ${suggested_vault_label}"
 
 while true; do
   CRYPTOVAULT_LABEL_INPUT=$(dialog --title "Crypto Vault Label/File Name" --inputbox "\nEnter the desired crypto vault label (no spaces). It will also be used as the crypto vault file name.\n\n
-NOTE: Since the crypto vaults are mapped through /dev/mapper system-wide (even when access is limited to a specific user), the label must be unique on the system.\n\n
+NOTE: Since the crypto vaults are mapped through /dev/mapper system-wide (even when access is limited to a specific user), the label must be unique on the system. For user vaults, including the user's name in the vault name is recommended.\n\n
 NOTE: To accept the default/suggestion, just hit ENTER\n" 17 70 "${suggested_vault_label}" 2>&1 > /dev/tty)
   _ret=$?
 
@@ -967,13 +1008,12 @@ NOTE: To accept the default/suggestion, just hit ENTER\n" 17 70 "${suggested_vau
 done
 
 # VAULT MOUNTPOINT
+# $initial_suggested_mountpoint_dir comes from preincrement (double-checking here..)
+get_first_available_dir suggested_mountpoint_dir $initial_suggested_mountpoint_dir "any_empty"
+
 if [ "$current_user" = "root" ]; then
-  initial_suggested_mountpoint_dir=/mnt/cryptovault
-  get_first_available_dir suggested_mountpoint_dir $initial_suggested_mountpoint_dir "any_empty"
   mountpoint_example="\nSuggested system-wide mountpoint location: ${suggested_mountpoint_dir}"
 else
-  initial_suggested_mountpoint_dir=${HOME}/cryptovault
-  get_first_available_dir suggested_mountpoint_dir $initial_suggested_mountpoint_dir "any_empty"
   mountpoint_example="\nSuggested mountpoint location: ${suggested_mountpoint_dir}"
 fi
 
@@ -1002,7 +1042,7 @@ ${mountpoint_example}" 28 85
   find_existing_parent mountpath_existing_parent $MOUNTPOINT
   find_dir_owner mountpath_owner ${mountpath_existing_parent}
   # get this result array via a global set by find_existing_parent, called above
-  mountpath_first_created=${fep_result[1]}
+  mountpath_first_created=${fep_result[2]}
 
   different_owners_WARNING=""
   if [ "$vaultpath_owner" != "$mountpath_owner" ]; then
@@ -1107,7 +1147,7 @@ ${commanddir_example}" 26 90
   find_existing_parent commanddir_existing_parent $CRYPTOVAULT_COMMANDDIR
   find_dir_owner commanddir_parent_owner ${commanddir_existing_parent}
   # get this result array via a global set by find_existing_parent, called above
-  commanddir_first_created=${fep_result[1]}
+  commanddir_first_created=${fep_result[2]}
 
   different_owners_WARNING=""
   if [ "$commanddir_parent_owner" != "$vaultpath_owner" ]; then
@@ -1161,14 +1201,14 @@ ${commanddir_example}" 26 90
 
 done
 
-#TODO: Offer to symlink command scripts onto PATH
+#TODO: Offer to symlink command scripts onto PATH (confirm that the path exists as expected)
 
 dialog --title "Confirm to start crypto vault creation" --yesno "\nIf you proceed, the encrypted vault will be created with the following parameters you have entered:\n\n
 Vault filesystem...........: ${CRYPTOVAULT_FS}\n
 Vault size.................: ${VAULTSIZEVAL}${VAULTSIZEUNIT}\n
 Vault label................: ${CRYPTOVAULT_LABEL}\n
 Vault file path............: ${VAULTFILE_FQFN} (owned by ${vaultpath_owner})\n
-Vault mount path...........: ${MOUNTPOINT} (owned by ${mountpath_owner})\n
+Vault mountpoint path......: ${MOUNTPOINT} (owned by ${mountpath_owner})\n
 Vault command script path..: ${CRYPTOVAULT_COMMANDDIR} (owned by ${commanddir_parent_owner})\n\n
 If the values are not correct, select \"NO\", and run the script again.\n\nDo you want to proceed?" 19 110
 _ret=$?
@@ -1443,7 +1483,7 @@ fi
 if [ ${_ret} -eq 0 ]; then
   echo "mount command script stub copied."
 else
-  echo "Unable to copy the mount command script stub to the vault command directory. Aborting."
+  echo "Unable to copy the mount command script stub to the vault command directory. Unable to proceed."
   cleanup
 fi
 
@@ -1461,7 +1501,7 @@ fi
 if [ ${_ret} -eq 0 ]; then
   echo "umount command script stub copied."
 else
-  echo "Unable to copy the umount command script stub to the vault command directory. Aborting."
+  echo "Unable to copy the umount command script stub to the vault command directory. Unable to proceed."
   cleanup
 fi
 
@@ -1479,18 +1519,38 @@ fi
 if [ ${_ret} -eq 0 ]; then
   echo "util command script stub copied."
 else
-  echo "Unable to copy the util command script stub to the vault command directory. Aborting."
+  echo "Unable to copy the util command script stub to the vault command directory. Unable to proceed."
   cleanup
 fi
 
+# centralized error check for the command script customization functions
+tempfile_customization_validation() {
+echo retval is $1
+
+  local retval="$1"
+  local step="$2"
+
+  if [ "$retval" != "0" ]; then
+    echo "Error in customizing the vault command scripts (failed while ${step}). Unable to proceed."
+  fi
+}
+
 # create file descriptor reference to a deleted temp file (automatically purged on exit)
 tmpfile=$(mktemp /tmp/tmp.XXXXXX)
+tempfile_customization_validation $? "creting tempfile"
+
 exec 3>"$tmpfile"
+tempfile_customization_validation $? "creating tempfile handle"
+
 rm "$tmpfile"
+tempfile_customization_validation $? "removing tempfile ${tmpfile}"
 
 echo -e "\n\e${BIWhite}Adding the vault-specific configuration variables to the command script stubs...\e${Color_Off}"
 
 # NOTE: The non-standard code indentation on the following items is intentional; do not modify it!
+
+
+# MOUNT SCRIPT...
 
 # prepare mount script
 if [ "$CRYPTOVAULT_FS" = "zfs" ]; then
@@ -1501,6 +1561,8 @@ CRYPTOVAULT_MOUNTPOINT=${MOUNTPOINT}
 CRYPTOVAULT_LABEL=${CRYPTOVAULT_LABEL}
 ZPOOL_ID=${zpool_id}\n" > /dev/fd/3
 
+  tempfile_customization_validation $? "preparing zfs mount script variables"
+
 else
 
   echo -e "#!/bin/bash\n
@@ -1509,20 +1571,42 @@ CRYPTOVAULT_FQFN=${VAULTFILE_FQFN}
 CRYPTOVAULT_MOUNTPOINT=${MOUNTPOINT}
 CRYPTOVAULT_LABEL=${CRYPTOVAULT_LABEL}\n" > /dev/fd/3
 
+  tempfile_customization_validation $? "preparing ext4 mount script variables"
+
 fi
 
 # append stub file into the temp file descriptor
-#TODO: make below command subject to  command_fileop_sudoreq!!
-sudoit _ret cat "${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}" >> /dev/fd/3
+if [ "$command_fileop_sudoreq" = "false" ]; then
+  cat "${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}" >> /dev/fd/3
+  _ret=$?
+else
+  sudoit _ret cat "${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}" >> /dev/fd/3
+fi
+tempfile_customization_validation ${_ret} "appending mount script stub"
 
 # replace the original script with the prepended script
-#TODO: make below command subject to  command_fileop_sudoreq!!
-cat /dev/fd/3 | sudoit _ret dd of="${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}"
+if [ "$command_fileop_sudoreq" = "false" ]; then
+  cat /dev/fd/3 | dd of="${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}" status=none
+  _ret1=${PIPESTATUS[0]}
+echo 111
+  _ret2=${PIPESTATUS[1]}
+else
+  cat /dev/fd/3 | sudoit _ret dd of="${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}" status=none
+  _ret1=${PIPESTATUS[0]}
+  _ret2=${_ret}
+fi
+
+tempfile_customization_validation ${_ret1} "outputting customized mount script from the temp file handle"
+tempfile_customization_validation ${_ret2} "writing output from the temp file handle into mount script file"
 
 # purge the file descriptor
 cat /dev/null > /dev/fd/3
+tempfile_customization_validation $? "purging the temporary file handle after mount script creation"
 
 echo "Crypto vault mount script now ready at ${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}"
+
+
+# UMOUNT SCRIPT...
 
 # prepare umount script
 echo -e "#!/bin/bash\n
@@ -1531,18 +1615,40 @@ CRYPTO_MOUNTPOINT=${MOUNTPOINT}
 CRYPTO_LABEL=${CRYPTOVAULT_LABEL}
 ZPOOL_ID=${zpool_id}\n" > /dev/fd/3
 
+tempfile_customization_validation $? "preparing umount script variables"
+
 # append stub file into the temp file descriptor
-#TODO: make below command subject to  command_fileop_sudoreq!!
-sudoit _ret cat "${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL}" >> /dev/fd/3
+if [ "$command_fileop_sudoreq" = "false" ]; then
+  cat "${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL}" >> /dev/fd/3
+  _ret=$?
+else
+  sudoit _ret cat "${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL}" >> /dev/fd/3
+fi
+tempfile_customization_validation ${_ret} "appending umount script stub"
 
 # replace the original script with the prepended script
-#TODO: make below command subject to  command_fileop_sudoreq!!
-cat /dev/fd/3 | sudoit _ret dd of="${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL}"
+if [ "$command_fileop_sudoreq" = "false" ]; then
+  cat /dev/fd/3 | dd of="${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL}" status=none
+  _ret1=${PIPESTATUS[0]}
+echo 222
+  _ret2=${PIPESTATUS[1]}
+else
+  cat /dev/fd/3 | sudoit _ret dd of="${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL}" status=none
+  _ret1=${PIPESTATUS[0]}
+  _ret2=${_ret}
+fi
+
+tempfile_customization_validation ${_ret1} "outputting customized umount script from the temp file handle"
+tempfile_customization_validation ${_ret2} "writing output from the temp file handle into umount script file"
 
 # purge the file descriptor
 cat /dev/null > /dev/fd/3
+tempfile_customization_validation $? "purging the temporary file handle after umount script creation"
 
 echo "Crypto vault umount script now ready at ${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL}"
+
+
+# UTIL SCRIPT...
 
 # prepare the util script
 echo -e "#!/bin/bash\n
@@ -1552,16 +1658,35 @@ CRYPTO_MOUNTPOINT=${MOUNTPOINT}
 CRYPTO_LABEL=${CRYPTOVAULT_LABEL}
 ZPOOL_ID=${zpool_id}\n" > /dev/fd/3
 
+tempfile_customization_validation $? "preparing util script variables"
+
 # append stub file into the temp file descriptor
-#TODO: make below command subject to  command_fileop_sudoreq!!
-sudoit _ret cat "${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL}" >> /dev/fd/3
+if [ "$command_fileop_sudoreq" = "false" ]; then
+  cat "${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL}" >> /dev/fd/3
+  _ret=$?
+else
+  sudoit _ret cat "${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL}" >> /dev/fd/3
+fi
+tempfile_customization_validation ${_ret} "appending util script stub"
 
 # replace the original script with the prepended script
-#TODO: make below command subject to  command_fileop_sudoreq!!
-cat /dev/fd/3 | sudoit _ret dd of="${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL}"
+if [ "$command_fileop_sudoreq" = "false" ]; then
+  cat /dev/fd/3 | dd of="${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL}" status=none
+  _ret1=${PIPESTATUS[0]}
+echo 333
+  _ret2=${PIPESTATUS[1]}
+else
+  cat /dev/fd/3 | sudoit _ret dd of="${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL}" status=none
+  _ret1=${PIPESTATUS[0]}
+  _ret2=${_ret}
+fi
+
+tempfile_customization_validation ${_ret1} "outputting customized util script from the temp file handle"
+tempfile_customization_validation ${_ret2} "writing output from the temp file handle into util script file"
 
 # purge the file descriptor
 cat /dev/null > /dev/fd/3
+tempfile_customization_validation $? "purging the temporary file handle after util script creation"
 
 echo "Crypto vault utility script now ready at ${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL}"
 echo
@@ -1575,7 +1700,7 @@ sudoit _ret $executable
 if [ ${_ret} -eq 0 ]; then
   echo "Vault command directory/script owner set."
 else
-  echo "Unable to set the correct owner for the vault command directory/scripts. Aborting."
+  echo "Unable to set the correct owner for the vault command directory/scripts. Unable to proceed."
   cleanup
 fi
 
@@ -1588,7 +1713,7 @@ sudoit _ret $executable
 if [ ${_ret} -eq 0 ]; then
   echo "Vault command directory/script permissions set."
 else
-  echo "Unable to set the necessary permissions for the vault command directory/scripts. Aborting."
+  echo "Unable to set the necessary permissions for the vault command directory/scripts. Unable to proceed."
   cleanup
 fi
 
@@ -1603,7 +1728,7 @@ answer=$( while ! head -c 1 | grep -i '[yn]' ;do true ;done )
 stty $old_stty_cfg
 if echo "$answer" | grep -iq "^n" ; then
   echo
-  echo "Abandoning the created crypt disk."
+  echo "Destroying the created crypt disk."
   cleanup
 else
 
