@@ -1442,6 +1442,7 @@ if [ ! -d ${SCRIPT_DIR}/_stubs ] ||
   cleanup 
 fi
 
+#TODO: Can the command script directory be named without the suggested user name? 
 # create command script directory
 commanddir_creation_error="false"
 if [ "$commanddir_exists" = "false" ]; then
@@ -1467,66 +1468,8 @@ if [ "$commanddir_exists" = "false" ]; then
   fi
 fi
 
-echo -e "\e${BIWhite}Copying the vault command script stubs...\e${Color_Off}"
-
-# copy mount command stub
-executable="cp ${SCRIPT_DIR}/_stubs/mount-crypto ${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}"
-if [ "$command_fileop_sudoreq" = "false" ]; then
-  echo -e "${executing}: $executable"
-  eval $executable 2>/dev/null
-  _ret=$?
-else
-  echo -e "${executing}$elevated: $executable"
-  sudoit _ret $executable
-fi
-
-if [ ${_ret} -eq 0 ]; then
-  echo "mount command script stub copied."
-else
-  echo "Unable to copy the mount command script stub to the vault command directory. Unable to proceed."
-  cleanup
-fi
-
-# copy umount command stub
-executable="cp ${SCRIPT_DIR}/_stubs/umount-crypto ${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL}"
-if [ "$command_fileop_sudoreq" = "false" ]; then
-  echo -e "${executing}: $executable"
-  eval $executable 2>/dev/null
-  _ret=$?
-else
-  echo -e "${executing}$elevated: $executable"
-  sudoit _ret $executable
-fi
-
-if [ ${_ret} -eq 0 ]; then
-  echo "umount command script stub copied."
-else
-  echo "Unable to copy the umount command script stub to the vault command directory. Unable to proceed."
-  cleanup
-fi
-
-# copy util command stub
-executable="cp ${SCRIPT_DIR}/_stubs/util-crypto ${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL}"
-if [ "$command_fileop_sudoreq" = "false" ]; then
-  echo -e "${executing}: $executable"
-  eval $executable 2>/dev/null
-  _ret=$?
-else
-  echo -e "${executing}$elevated: $executable"
-  sudoit _ret $executable
-fi
-
-if [ ${_ret} -eq 0 ]; then
-  echo "util command script stub copied."
-else
-  echo "Unable to copy the util command script stub to the vault command directory. Unable to proceed."
-  cleanup
-fi
-
 # centralized error check for the command script customization functions
 tempfile_customization_validation() {
-echo retval is $1
-
   local retval="$1"
   local step="$2"
 
@@ -1575,29 +1518,27 @@ CRYPTOVAULT_LABEL=${CRYPTOVAULT_LABEL}\n" > /dev/fd/3
 
 fi
 
+#TODO: add "EXECUTING" outputs to the process
+
 # append stub file into the temp file descriptor
 if [ "$command_fileop_sudoreq" = "false" ]; then
-  cat "${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}" >> /dev/fd/3
+  cat "${SCRIPT_DIR}/_stubs/mount-crypto" >> /dev/fd/3
   _ret=$?
 else
   sudoit _ret cat "${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}" >> /dev/fd/3
 fi
 tempfile_customization_validation ${_ret} "appending mount script stub"
 
-# replace the original script with the prepended script
+# write the customized script into the vault command directory
 if [ "$command_fileop_sudoreq" = "false" ]; then
-  cat /dev/fd/3 | dd of="${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}" status=none
-  _ret1=${PIPESTATUS[0]}
-echo 111
-  _ret2=${PIPESTATUS[1]}
+  cat /dev/fd/3 | dd of="${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}" &> /dev/null
+  _ret=$?
 else
-  cat /dev/fd/3 | sudoit _ret dd of="${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}" status=none
-  _ret1=${PIPESTATUS[0]}
-  _ret2=${_ret}
+  cat /dev/fd/3 | sudoit _ret dd of="${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}" &> /dev/null
 fi
 
-tempfile_customization_validation ${_ret1} "outputting customized mount script from the temp file handle"
-tempfile_customization_validation ${_ret2} "writing output from the temp file handle into mount script file"
+tempfile_customization_validation ${PIPESTATUS[0]} "outputting customized mount script from the temp file handle"
+tempfile_customization_validation ${_ret} "writing output from the temp file handle into mount script file"
 
 # purge the file descriptor
 cat /dev/null > /dev/fd/3
@@ -1619,27 +1560,23 @@ tempfile_customization_validation $? "preparing umount script variables"
 
 # append stub file into the temp file descriptor
 if [ "$command_fileop_sudoreq" = "false" ]; then
-  cat "${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL}" >> /dev/fd/3
+  cat "${SCRIPT_DIR}/_stubs/umount-crypto" >> /dev/fd/3
   _ret=$?
 else
   sudoit _ret cat "${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL}" >> /dev/fd/3
 fi
 tempfile_customization_validation ${_ret} "appending umount script stub"
 
-# replace the original script with the prepended script
+# write the customized script into the vault command directory
 if [ "$command_fileop_sudoreq" = "false" ]; then
-  cat /dev/fd/3 | dd of="${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL}" status=none
-  _ret1=${PIPESTATUS[0]}
-echo 222
-  _ret2=${PIPESTATUS[1]}
+  cat /dev/fd/3 | dd of="${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL}" &> /dev/null
+  _ret=$?
 else
-  cat /dev/fd/3 | sudoit _ret dd of="${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL}" status=none
-  _ret1=${PIPESTATUS[0]}
-  _ret2=${_ret}
+  cat /dev/fd/3 | sudoit _ret dd of="${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL}" &> /dev/null
 fi
 
-tempfile_customization_validation ${_ret1} "outputting customized umount script from the temp file handle"
-tempfile_customization_validation ${_ret2} "writing output from the temp file handle into umount script file"
+tempfile_customization_validation ${PIPESTATUS[0]} "outputting customized umount script from the temp file handle"
+tempfile_customization_validation ${_ret} "writing output from the temp file handle into umount script file"
 
 # purge the file descriptor
 cat /dev/null > /dev/fd/3
@@ -1662,27 +1599,23 @@ tempfile_customization_validation $? "preparing util script variables"
 
 # append stub file into the temp file descriptor
 if [ "$command_fileop_sudoreq" = "false" ]; then
-  cat "${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL}" >> /dev/fd/3
+  cat "${SCRIPT_DIR}/_stubs/util-crypto" >> /dev/fd/3
   _ret=$?
 else
   sudoit _ret cat "${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL}" >> /dev/fd/3
 fi
 tempfile_customization_validation ${_ret} "appending util script stub"
 
-# replace the original script with the prepended script
+# write the customized script into the vault command directory
 if [ "$command_fileop_sudoreq" = "false" ]; then
-  cat /dev/fd/3 | dd of="${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL}" status=none
-  _ret1=${PIPESTATUS[0]}
-echo 333
-  _ret2=${PIPESTATUS[1]}
+  cat /dev/fd/3 | dd of="${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL}" &> /dev/null
+  _ret=$?
 else
-  cat /dev/fd/3 | sudoit _ret dd of="${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL}" status=none
-  _ret1=${PIPESTATUS[0]}
-  _ret2=${_ret}
+  cat /dev/fd/3 | sudoit _ret dd of="${CRYPTOVAULT_COMMANDDIR}/util-${CRYPTOVAULT_LABEL}" &> /dev/null
 fi
 
-tempfile_customization_validation ${_ret1} "outputting customized util script from the temp file handle"
-tempfile_customization_validation ${_ret2} "writing output from the temp file handle into util script file"
+tempfile_customization_validation ${PIPESTATUS[0]} "outputting customized util script from the temp file handle"
+tempfile_customization_validation ${_ret} "writing output from the temp file handle into util script file"
 
 # purge the file descriptor
 cat /dev/null > /dev/fd/3
