@@ -90,11 +90,7 @@ On_IWhite='\033[0;107m'   # White
 declare -ir false=0 true=1
 
 # get the "home" of this script, no matter where this is executed from
-
-# todo: this requires coreutils.. is there a native way? Check for avialablility of the command first?
-#SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
-# maybe the following works without readlink, test...
-
+# SCRIPT_DIR=$(dirname "$(readlink -f "$0")")  # this required coreutils
 SCRIPT_DIR=$(exec 2>/dev/null;cd -- $(dirname "$0"); unset PWD; /usr/bin/pwd || /bin/pwd || pwd)
 
 # purge sudo password cache (if set previously), and reset other sudo related variables
@@ -130,11 +126,45 @@ CRYPTPWD=
 : ${DIALOG_CANCEL=1}
 
 
+declare -A osInfo;
+osInfo[/etc/redhat-release]=yum
+osInfo[/etc/debian_version]=apt-get
+
+package_manager=""
+for f in ${!osInfo[@]}
+do
+	if [[ -f $f ]]; then
+		package_manager=${osInfo[$f]}
+    fi
+done
+
+if [ "$package_manager" = "" ]; then
+	package_manager="[your package manager]"
+fi
+
+
 # FUNCTIONS ==================================================================
 
 # exists for commands
 exists() {
 	command -v "$1" >/dev/null 2>&1
+}
+
+yesno() {
+	# $1 is the retval (_ret)
+
+	old_stty_cfg=$(stty -g)
+	stty raw -echo
+	answer=$( while ! head -c 1 | grep -i '[yn]' ;do true ;done )
+	stty $old_stty_cfg
+
+	if echo "$answer" | grep -iq "^n" ; then
+		_ret="no"
+	else
+		_ret="yes"
+	fi
+
+	eval "$1=${_ret}"
 }
 
 validate_sudopwd() {
@@ -172,9 +202,11 @@ get_sudo_pwd() {
 		# note: validate_sudopwd exits the while loop when pass
 		case ${_ret} in
 			0)
-				validate_sudopwd;;
+				validate_sudopwd
+				;;
 			1)
-				early_exit;;
+				early_exit
+				;;
 		esac
 	done
 }
@@ -199,7 +231,7 @@ sudoit() {
 		_ret=$?
 	fi
 
-	eval "$1=${_ret}"  
+	eval "$1=${_ret}"
 }
 
 # always sudo because executing as a different user
@@ -407,7 +439,6 @@ get_first_available_file() {
 	faf[1]=${file_to_check}${n}
 	faf[2]=$n
 	eval "$1=${faf[1]}"
-
 }
 
 # check mountpath against mounts in /proc/mounts
@@ -656,12 +687,10 @@ cleanup() {
 		exit 1
 
 	fi
-
 }
 
 # exit before the action begins
 early_exit() {
-
 	dialog --title "Confirm script termination" --yesno "\nAre you sure you want to exit the crypt vault creation process?" 8 70
 	_ret=$?
 
@@ -686,13 +715,31 @@ exit_info() {
 
 # PREREQS CHECKS =============================================================
 
+if [[ "$package_manager" != "apt-get" ]] &&
+	[[ "$package_manager" != "yum" ]]; then
+
+	printf "NOTE: Only Debian/Ubuntu and RedHat/CentOS variants are officially supported by this script!\nContinue anyway? (y/n)?"
+	yesno _ret
+	if [ "$_ret" = "no" ]; then
+		exit 1
+	fi
+fi
+
 if ! exists dialog ; then
-	printf "\n*************************************************************************************************\n\
-This script requires dialog. Install it first with 'sudo apt-get install dialog', then try again!\n\
+	if [[ "$package_manager" == "apt-get" ]] ||
+		[[ "$package_manager" == "yum" ]]; then
+
+		printf "\n\n*************************************************************************************************\n\
+This script requires dialog. Install it first with 'sudo $package_manager install dialog', then try again!\n\
 *************************************************************************************************\n\n"
-  
-#TODO: Offer install dialog, proceed if user chooses to do so, and if installation is successful.
-#      Must use sudo. Must support at least yum and apt.
+
+	else
+
+		printf "\n\n*************************************************************************************************\n\
+This script requires dialog. Install it first with your package manager, then try again!\n
+*************************************************************************************************\n\n"
+
+	fi
 
 	exit 1
 fi
@@ -707,14 +754,30 @@ fi
 
 CRYPTSETUP=$(sudo which cryptsetup)
 if [ $? -ne 0 ]; then
-	printf "\n*********************************************************************************************************\n\
-This script requires cryptsetup. Install it first with 'sudo apt-get install cryptsetup', then try again!\n\
+
+	echo
+	echo -n "This script requires 'cryptsetup'. Can I install it? (y/n)? "
+	yesno _ret
+	if [ "$_ret" = "yes" ]; then
+		if [[ "$package_manager" == "apt-get" ]]; then
+			sudoit _ret apt-get -y install cryptsetup
+		elif [[ "$package_manager" == "yum" ]]; then
+			sudoit _ret yum -y install cryptsetup
+		fi
+
+		if [ ${_ret} -eq 1 ]; then
+			printf "\ncryptsetup was installed; continuing...\n\n"
+		else
+			printf "\ncryptsetup installation was unsuccessful. Unable to continue. Please try installing manually, then try again.\n\n"
+			exit 1
+		fi
+
+	else 
+		printf "\n\n*********************************************************************************************************\n\
+This script requires cryptsetup. Install it first with 'sudo $package_manager install cryptsetup', then try again!\n\
 *********************************************************************************************************\n\n"
-
-#TODO: Offer install cryptsetup, proceed if user chooses to do so, and if installation is successful.
-#      Must use sudo. Must support at least yum and apt.
-
 	exit 1
+	fi
 fi
 
 
@@ -778,14 +841,32 @@ NOTE: Highlight the choice with up/down arrow, select with SPACE." 16 55 2 \
 
 		ZFS=$(sudo which zfs)
 		if [ $? -ne 0 ]; then
-			printf "\n\n**************************************************************************************************************************************\n\
-To use ZFS filesystem zfsutils-linux package is required. Install it first with 'sudo apt-get install zfsutils-linux', then try again!\
+
+			echo
+			echo -n "To use ZFS filesystem zfsutils-linux package is required. Can I install it? (y/n)? "
+			yesno _ret
+			if [ "$_ret" = "yes" ]; then
+				if [[ "$package_manager" == "apt-get" ]]; then
+					sudoit _ret apt-get -y install zfsutils-linux
+				elif [[ "$package_manager" == "yum" ]]; then
+					sudoit _ret yum -y install zfsutils-linux
+				fi
+
+				if [ ${_ret} -eq 1 ]; then
+					printf "\nzfsutils-linux was installed; continuing...\n\n"
+				else
+					printf "\nzfsutils-linux installation was unsuccessful. Unable to continue. Please try installing it manually, then try again.\n\n"
+					exit 1
+				fi
+
+			else 
+
+				printf "\n\n**************************************************************************************************************************************\n\
+To use ZFS filesystem zfsutils-linux package is required. Install it first with 'sudo $package_manager install zfsutils-linux', then try again!\
 \n**************************************************************************************************************************************\n\n\n"
 
-#TODO: Offer install zfsutils-linux, proceed if user chooses to do so, and if installation is successful.
-#      Must use sudo. Must support at least yum and apt.
-
 			exit 1
+			fi
 		fi
 		break
 
@@ -1679,11 +1760,8 @@ fi
 # confirm to keep the vault (the final option to fully bail out)
 echo
 echo -n "Crypto vault \"${CRYPTOVAULT_LABEL}\" has been created. Keep this new vault (y/n)? "
-old_stty_cfg=$(stty -g)
-stty raw -echo
-answer=$( while ! head -c 1 | grep -i '[yn]' ;do true ;done )
-stty $old_stty_cfg
-if echo "$answer" | grep -iq "^n" ; then
+yesno _ret
+if [ "$_ret" = "no" ]; then
 	echo
 	echo "Destroying the created crypt disk."
 	cleanup
