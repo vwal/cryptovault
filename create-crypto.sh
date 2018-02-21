@@ -459,9 +459,9 @@ check_mounted() {
 cleanup() {
 	echo
 	if [ "$1" = "interrupt" ]; then
-		echo -e "\e${Black}\e${On_Red}SCRIPT INTERRUPTED\e${Color_Off}"  
+		echo -e "${Black}${On_Red}SCRIPT INTERRUPTED${Color_Off}"  
 	fi
-	echo -e "\e${BIRed}Cleaning up...\e${Color_Off}"  
+	echo -e "${BIRed}Cleaning up...${Color_Off}"  
 
 	check_mounted mount_in_proc $MOUNTPOINT
 	if [ "${mount_in_proc}" = "true" ]; then
@@ -476,7 +476,7 @@ cleanup() {
 				sudoit _ret zpool export $zpool_id > /dev/null 2>&1
 				if [ ${_ret} -ne 0 ]; then
 					if ! sudo -n true 2>/dev/null; then 
-						echo -e "\e${IYellow}This operation may require you to re-enter your sudo password below:\e${Color_Off}"
+						echo -e "${IYellow}This operation may require you to re-enter your sudo password below:${Color_Off}"
 						echo
 					fi 
 					echo "Unable to unmount the crypto vault; the device is busy. Free the device (such as make sure you aren't currently cd'd in the crypto vault, or that you don't have files open from the vault), and try again."
@@ -499,7 +499,7 @@ cleanup() {
 				sudoit _ret umount ${MOUNTPOINT} > /dev/null 2>&1
 				if [ ${_ret} -ne 0 ]; then
 					if ! sudo -n true 2>/dev/null; then 
-						echo -e "\e${IYellow}This operation may require you to re-enter your sudo password below:\e${Color_Off}"
+						echo -e "${IYellow}This operation may require you to re-enter your sudo password below:${Color_Off}"
 						echo
 					fi 
 					echo "Unable to unmount the crypto vault; the device is busy. Free the device (such as make sure you aren't currently cd'd in the crypto vault, or that you don't have files open from the vault), and try again."
@@ -532,7 +532,7 @@ cleanup() {
 	fi
 
 	if ! sudo -n true 2>/dev/null; then 
-		echo -e "\e${IYellow}This operation may require you to re-enter your sudo password below:\e${Color_Off}"
+		echo -e "${IYellow}This operation may require you to re-enter your sudo password below:${Color_Off}"
 	fi 
 	# acquire a free loop device
 	loopdev2del=$(sudo losetup --raw | grep ${VAULTFILE_FQFN} | awk '{print $1}')
@@ -1313,7 +1313,7 @@ case ${_ret} in
 	0)
 		;;
 	1)
-		clear && echo -e "\n\e${BWhite}\e${On_Red} CRYPTO VAULT CREATION WAS CANCELLED \e${Color_Off}\n\n" && exit 1
+		clear && echo -e "\n${BWhite}${On_Red} CRYPTO VAULT CREATION WAS CANCELLED ${Color_Off}\n\n" && exit 1
 		;;
 esac
 
@@ -1331,9 +1331,9 @@ echo
 trap - INT TERM
 trap 'cleanup interrupt' INT TERM
 
-executing="\e${BGreen}EXECUTING\e${Color_Off}"
+executing="${BGreen}EXECUTING${Color_Off}"
 if [ "$im_root" = "false" ]; then
-	elevated=" \e${Black}\e${On_Green}ELEVATED\e${Color_Off}"
+	elevated=" ${Black}${On_Green}ELEVATED${Color_Off}"
 else
 	elevated=''
 fi
@@ -1341,7 +1341,7 @@ fi
 # create vault path
 vaultpath_creation_error="false"
 if [ "$vaultpath_exists" = "false" ]; then
-	echo -e "\e${BIWhite}Creating vault path...\e${Color_Off}"
+	echo -e "${BIWhite}Creating vault path...${Color_Off}"
 	executable="mkdir -p $VAULTFILE_HOME"
 	if [ "$vaultpath_owner" = "$current_user" ]; then
 		echo -e "$executing: $executable"
@@ -1359,7 +1359,7 @@ if [ "$vaultpath_exists" = "false" ]; then
 	if [ "$vaultpath_creation_error" = "true" ] ||
 		[ ! -d "$VAULTFILE_HOME" ]; then
 
-		echo -e "\e${BWhite}\e${On_Red}Could not create vault path \"${VAULTFILE_HOME}\". Unable to proceed.\e${Color_Off}"
+		echo -e "${BWhite}${On_Red}Could not create vault path \"${VAULTFILE_HOME}\". Unable to proceed.${Color_Off}"
 		cleanup
 	fi
 fi
@@ -1368,7 +1368,7 @@ echo
 
 # create blank vault container file
 vaultfile_creation_error="false"
-echo -e "\e${BIWhite}Creating blank vault container file...\e${Color_Off}"
+echo -e "${BIWhite}Creating blank vault container file...${Color_Off}"
 if [ "$VAULTSIZEUNIT" = "GB" ]; then
 	let vaultsize=$VAULTSIZEVAL*1024
 else
@@ -1396,7 +1396,7 @@ fi
 if [ "$vaultfile_creation_error" = "true" ] ||
 	[ ! -e "${VAULTFILE_FQFN}" ]; then
 
-	echo -e "\e${BWhite}\e${On_Red}Could not create vault container file \"${VAULTFILE_FQFN}\". Unable to proceed.\e${Color_Off}"
+	echo -e "${BWhite}${On_Red}Could not create vault container file \"${VAULTFILE_FQFN}\". Unable to proceed.${Color_Off}"
 	cleanup
 fi
 
@@ -1405,7 +1405,7 @@ echo
 # create mountpoint path
 mountpoint_creation_error="false"
 if [ "$mountpoint_exists" = "false" ]; then
-	echo -e "\e${BIWhite}Creating the mountpoint (an empty directory)...\e${Color_Off}"
+	echo -e "${BIWhite}Creating the mountpoint (an empty directory)...${Color_Off}"
 	
 	executable="mkdir -p $MOUNTPOINT"
 	if [ "$mountpath_owner" = "$current_user" ]; then
@@ -1426,7 +1426,7 @@ if [ "$mountpoint_exists" = "false" ]; then
 	if [ "$mountpoint_creation_error" = "true" ] ||
 		[ ! -d "$MOUNTPOINT" ]; then
 
-		echo -e "\e${BWhite}\e${On_Red}Could not create the mountpoint at \"${MOUNTPOINT}\". Unable to proceed.\e${Color_Off}"
+		echo -e "${BWhite}${On_Red}Could not create the mountpoint at \"${MOUNTPOINT}\". Unable to proceed.${Color_Off}"
 		cleanup
 	fi
 fi
@@ -1434,12 +1434,12 @@ fi
 echo
 
 # format the container
-echo -e "\e${BIWhite}Formatting the container with encrypted LUKS filesystem...\e${Color_Off}"
+echo -e "${BIWhite}Formatting the container with encrypted LUKS filesystem...${Color_Off}"
 echo -e "${executing}$elevated: cryptsetup luksFormat -q ${VAULTFILE_FQFN}"
 
 if [ "$im_root" = "false" ]; then
 	if ! sudo -n true 2>/dev/null; then 
-		echo -e "\e${IYellow}This operation may require you to re-enter your sudo password below:\e${Color_Off}"
+		echo -e "${IYellow}This operation may require you to re-enter your sudo password below:${Color_Off}"
 	fi
 	echo -n "$CRYPTPWD" | sudo cryptsetup luksFormat -q ${VAULTFILE_FQFN} -
 	_ret=${PIPESTATUS[1]}
@@ -1451,16 +1451,16 @@ fi
 
 # test to make sure container gets formatted
 if [ ${_ret} -ne 0 ]; then
-	echo -e "\e${BWhite}\e${On_Red}Could not format the vault container with LUKS at \"${VAULTFILE_FQFN}\". Unable to proceed.\e${Color_Off}"
+	echo -e "${BWhite}${On_Red}Could not format the vault container with LUKS at \"${VAULTFILE_FQFN}\". Unable to proceed.${Color_Off}"
 	cleanup
 fi
 
 echo
 
 # set up the loop device
-echo -e "\e${BIWhite}Setting up the loop device...\e${Color_Off}"
+echo -e "${BIWhite}Setting up the loop device...${Color_Off}"
 if ! sudo -n true 2>/dev/null; then 
-	echo -e "\e${IYellow}This operation may require you to re-enter your sudo password below:\e${Color_Off}"
+	echo -e "${IYellow}This operation may require you to re-enter your sudo password below:${Color_Off}"
 fi
 loopdev=$(sudo losetup -f)
 echo "Using loop device: $loopdev"
@@ -1473,28 +1473,28 @@ loopdev_by_label=$(sudo losetup --raw | grep ${CRYPTOVAULT_LABEL} | awk '{print 
 if [ ${_ret} -ne 0 ] ||
 	[ "$loopdev_by_label" != "$loopdev" ]; then
 
-	echo -e "\e${BWhite}\e${On_Red}Could not set up the loop device. Unable to proceed.\e${Color_Off}"
+	echo -e "${BWhite}${On_Red}Could not set up the loop device. Unable to proceed.${Color_Off}"
 	cleanup
 fi
 
 echo
 
 # open the mapped loop device (req. selected encryption password)
-echo -e "\e${BIWhite}Opening the mapped device...\e${Color_Off}"
+echo -e "${BIWhite}Opening the mapped device...${Color_Off}"
 executable="cryptsetup luksOpen $loopdev ${CRYPTOVAULT_LABEL}"
 echo -e "${executing}$elevated: $executable"
-echo -e "\e${IYellow}The encrypted device is being opened. Please enter below the encryption password\nyou selected earlier in the process (NOTE: typed characters will not echo).\e${Color_Off}"
+echo -e "${IYellow}The encrypted device is being opened. Please enter below the encryption password\nyou selected earlier in the process (NOTE: typed characters will not echo).${Color_Off}"
 sudoit _ret $executable
 
 if [ ${_ret} -ne 0 ]; then
-	echo -e "\e${BWhite}\e${On_Red}Could not open the loop device (are you sure you entered the decryption password correctly?). Unable to proceed.\e${Color_Off}"
+	echo -e "${BWhite}${On_Red}Could not open the loop device (are you sure you entered the decryption password correctly?). Unable to proceed.${Color_Off}"
 	cleanup
 fi
 
 echo
 
 # create and mount the filesystem
-echo -e "\e${BIWhite}Creating the ${CRYPTOVAULT_FS} filesystem...\e${Color_Off}"
+echo -e "${BIWhite}Creating the ${CRYPTOVAULT_FS} filesystem...${Color_Off}"
 if [ "$CRYPTOVAULT_FS" = "zfs" ]; then
 	zpool_id="zpool-${CRYPTOVAULT_LABEL}"
 	echo "zpool ID for this crypto vault is: $zpool_id"
@@ -1518,13 +1518,13 @@ check_mounted mount_in_proc $MOUNTPOINT
 if [ "$mount_in_proc" = "false" ] ||
 	[ ${_ret} -ne 0 ]; then
 
-	echo -e "\e${BWhite}\e${On_Red}Could not mount the crypto vault at  \"${MOUNTPOINT}\". Unable to proceed.\e${Color_Off}"
+	echo -e "${BWhite}${On_Red}Could not mount the crypto vault at  \"${MOUNTPOINT}\". Unable to proceed.${Color_Off}"
 	cleanup
 fi
 
 if [ "$mountpath_owner" != "root" ]; then
 	echo
-	echo -e "\e${BIWhite}Setting the mountpoint permissions...\e${Color_Off}"
+	echo -e "${BIWhite}Setting the mountpoint permissions...${Color_Off}"
 	executable="chmod 770 ${MOUNTPOINT}"
 	echo -e "${executing}$elevated: $executable"
 	sudoit _ret $executable
@@ -1551,7 +1551,7 @@ fi
 # create command script directory
 commanddir_creation_error="false"
 if [ "$commanddir_exists" = "false" ]; then
-	echo -e "\e${BIWhite}Creating command script directory...\e${Color_Off}"
+	echo -e "${BIWhite}Creating command script directory...${Color_Off}"
 	executable="mkdir -p ${CRYPTOVAULT_COMMANDDIR}"
 	if [ "$command_fileop_sudoreq" = "false" ]; then
 		echo -e "$executing: $executable"
@@ -1569,7 +1569,7 @@ if [ "$commanddir_exists" = "false" ]; then
 	if [ "$commanddir_creation_error" = "true" ] ||
 		[ ! -d "$CRYPTOVAULT_COMMANDDIR" ]; then
 
-		echo -e "\e${BWhite}\e${On_Red}Could not create command script directory \"${CRYPTOVAULT_COMMANDDIR}\". Unable to proceed.\e${Color_Off}"
+		echo -e "${BWhite}${On_Red}Could not create command script directory \"${CRYPTOVAULT_COMMANDDIR}\". Unable to proceed.${Color_Off}"
 		cleanup
 	fi
 fi
@@ -1594,7 +1594,7 @@ tempfile_customization_validation $? "creating tempfile handle"
 rm "$tmpfile"
 tempfile_customization_validation $? "removing tempfile ${tmpfile}"
 
-echo -e "\n\e${BIWhite}Adding the vault-specific configuration variables to the command script stubs...\e${Color_Off}"
+echo -e "\n${BIWhite}Adding the vault-specific configuration variables to the command script stubs...${Color_Off}"
 
 # NOTE: The non-standard code indentation on the following items is intentional; do not modify it!
 
@@ -1731,7 +1731,7 @@ echo "Crypto vault utility script now ready at ${CRYPTOVAULT_COMMANDDIR}/util-${
 echo
 
 # set the owner for the command directory/scripts
-echo -e "\e${BIWhite}Setting the owner for the vault command scripts...\e${Color_Off}"
+echo -e "${BIWhite}Setting the owner for the vault command scripts...${Color_Off}"
 executable="chown -R ${commanddir_parent_owner}:${commanddir_parent_owner} ${CRYPTOVAULT_COMMANDDIR}"
 echo -e "${executing}$elevated: $executable"
 sudoit _ret $executable
@@ -1744,7 +1744,7 @@ else
 fi
 
 # set the permsissions for the command directory/scripts
-echo -e "\e${BIWhite}Setting the permissions for the vault command scripts...\e${Color_Off}"
+echo -e "${BIWhite}Setting the permissions for the vault command scripts...${Color_Off}"
 executable="chmod -R 750 ${CRYPTOVAULT_COMMANDDIR}"
 echo -e "${executing}$elevated: $executable"
 sudoit _ret $executable
