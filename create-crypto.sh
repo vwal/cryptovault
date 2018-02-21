@@ -109,7 +109,8 @@ mount_fileop_sudoreq="false"
 command_fileop_sudoreq="false"
 
 # who *am* I?
-login_user=$(logname)
+# todo: maybe use login_user for suggests?
+login_user=$(logname 2>/dev/null || echo ${SUDO_USER:-${USER}})
 current_user=$(whoami)
 # am I root??
 if [ "$EUID" -eq 0 ]; then
@@ -125,7 +126,7 @@ CRYPTPWD=
 : ${DIALOG_OK=0}
 : ${DIALOG_CANCEL=1}
 
-
+# get platform/package manager
 declare -A osInfo;
 osInfo[/etc/redhat-release]=yum
 osInfo[/etc/debian_version]=apt-get
@@ -765,7 +766,7 @@ if [ $? -ne 0 ]; then
 			sudoit _ret yum -y install cryptsetup
 		fi
 
-		if [ ${_ret} -eq 1 ]; then
+		if [ ${_ret} -eq 0 ]; then
 			printf "\ncryptsetup was installed; continuing...\n\n"
 		else
 			printf "\ncryptsetup installation was unsuccessful. Unable to continue. Please try installing manually, then try again.\n\n"
@@ -852,7 +853,7 @@ NOTE: Highlight the choice with up/down arrow, select with SPACE." 16 55 2 \
 					sudoit _ret yum -y install zfsutils-linux
 				fi
 
-				if [ ${_ret} -eq 1 ]; then
+				if [ ${_ret} -eq 0 ]; then
 					printf "\nzfsutils-linux was installed; continuing...\n\n"
 				else
 					printf "\nzfsutils-linux installation was unsuccessful. Unable to continue. Please try installing it manually, then try again.\n\n"
