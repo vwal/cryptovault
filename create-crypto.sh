@@ -143,6 +143,10 @@ if [ "$package_manager" = "" ]; then
 	package_manager="[your package manager]"
 fi
 
+# these are used as global multi-result arrays
+# to transit info from some functions
+declare -A fep_result
+declare -A loc_result
 
 # FUNCTIONS ==================================================================
 
@@ -168,6 +172,16 @@ yesno() {
 	eval "$1=${_ret}"
 }
 
+is_user_home() {
+	# $1 is the retval (_ret)
+	# $2 is the dir to check
+
+	# 1. who owns the first existing parent
+	# Just use that user for suggested vault name!
+
+	eval "$1=${_ret}"
+}
+
 validate_sudopwd() {
 	if [ "$is_sudo" = "1" ]; then
 		break
@@ -176,6 +190,7 @@ validate_sudopwd() {
 	fi
 }
 
+# todo: non-dialog pwd inquiry with an arg (for dialog install)
 get_sudo_pwd() {
 	# get password
 	while true; do
@@ -254,6 +269,7 @@ sudoitas() {
 	eval "$1=${_ret}"
 }
 
+
 # find the first existing parent of the given dir
 find_existing_parent() {
 	# $1 is the retval (_ret)
@@ -268,16 +284,16 @@ find_existing_parent() {
 
 		pa=""
 		max="${#p[@]}"
-		# record number of segments in the result array
+		# record number of segments in the result array (this is a global)
 		fep_result[3]=$max
 		i=0
 		while (( i<"$max" )); do
 			paprev=$pa
 			pa="$pa/${p[i++]}"
 			if [[ ! -e $pa ]]; then
-				# record first existing parent in the result array
+				# record first existing parent in the result array (this is a global)
 				fep_result[1]=$paprev
-				# record first created segment in the result array
+				# record first created segment in the result array (this is a global)
 				fep_result[2]=$pa
 				eval "$1=$paprev"
 				break
@@ -690,8 +706,70 @@ cleanup() {
 	fi
 }
 
+# THIS FUNCTION MODIFIES GLOBALS! 
+set_initial_locations() {
+
+	selected_user="$2"
+	selected_user_home=$(echo ~${selected_user})
+
+	if [ "$selected_user" = "root" ]; then
+		initial_suggested_vaulthome_dir="/var/vaultfiles"
+		initial_suggested_vault_label="cryptovault"
+		initial_suggested_vaultfile_fqfn="${initial_suggested_vaulthome_dir}/${initial_suggested_vault_label}"
+		initial_suggested_mountpoint_dir="/mnt/cryptovault"
+	else
+		initial_suggested_vaulthome_dir="${selected_user_home}/vaultfiles"
+		initial_suggested_vault_label="${selected_user}-cryptovault"
+		initial_suggested_vaultfile_fqfn="${initial_suggested_vaulthome_dir}/${initial_suggested_vault_label}"
+		initial_suggested_mountpoint_dir="${selected_user_home}/mnt/cryptovault"
+	fi
+}
+
+get_suggested_locations() {
+	# $1 is the retval (_ret)
+	# $2 is the vaultfile_fqfn to check
+	# $3 is the mountpoint_dir to check
+
+	local suggested_vaultfile_fqfn_to_check=$2
+	local suggested_mountpoint_dir_to_check=$3
+	local testing_vaultfile_fqfn
+	local testing_mountpoint_dir
+	local suggested_vault_label
+	local suggested_mountpoint_dir
+	local suggestion_updated="no"
+
+	if [ -e $suggested_vaultfile_fqfn_to_check ] ||
+		[ -e $suggested_mountpoint_dir_to_check ]; then
+
+		suggestion_updated="yes"
+		suggested_n=2
+		while true; do
+			testing_vaultfile_fqfn="${suggested_vaultfile_fqfn_to_check}${suggested_n}"
+			testing_mountpoint_dir="${suggested_mountpoint_dir_to_check}${suggested_n}"
+			
+			if [ -e "${testing_vaultfile_fqfn}" ] ||
+				[ -e "${testing_mountpoint_dir}" ]; then
+
+				((++suggested_n))
+			else
+				suggested_vault_label="${suggested_vaultfile_fqfn_to_check}${suggested_n}"
+				suggested_mountpoint_dir="${suggested_mountpoint_dir_to_check}${suggested_n}"
+				break
+			fi
+		done
+	else
+		suggested_vault_label="${suggested_vaultfile_fqfn_to_check}"
+		suggested_mountpoint_dir="${suggested_mountpoint_dir_to_check}"
+	fi
+
+	eval "$1=${suggestion_updated}"
+	loc_result[vault_label]="${suggested_vault_label}"
+	loc_result[mountpoint_dir]="${suggested_mountpoint_dir}"
+}
+
 # exit before the action begins
 early_exit() {
+
 	dialog --title "Confirm script termination" --yesno "\nAre you sure you want to exit the crypt vault creation process?" 8 70
 	_ret=$?
 
@@ -784,39 +862,15 @@ fi
 
 # MAIN LOGIC: QUERY VAULT PARAMETERS =========================================
 
-# pre-increment suggested paths so that the label and the suggeted mountpoint
+# set the initial vault name/location/mountpoint values
+set_initial_locations new_suggested_locations $current_user
+
+# pre-increment set initial paths so that the label and the suggeted mountpoint
 # numbers aren't out of sync (i.e. "/mnt/cryptovault2" vs. "/var/vaultfiles/cryptovault3")
-
-if [ "$current_user" = "root" ]; then
-	initial_suggested_vaulthome_dir="/var/vaultfiles"
-	initial_suggested_vault_label="cryptovault"
-	initial_suggested_vaultfile_fqfn="${initial_suggested_vaulthome_dir}/${initial_suggested_vault_label}"
-	initial_suggested_mountpoint_dir="/mnt/cryptovault"
-else
-	initial_suggested_vaulthome_dir="${HOME}/vaultfiles"
-	initial_suggested_vault_label="${current_user}-cryptovault"
-	initial_suggested_vaultfile_fqfn="${initial_suggested_vaulthome_dir}/${initial_suggested_vault_label}"
-	initial_suggested_mountpoint_dir="${HOME}/mnt/cryptovault"
-fi
-
-if [ -e $initial_suggested_vaultfile_fqfn ] ||
-	[ -e $initial_suggested_mountpoint_dir ]; then
-
-	suggested_n=2
-	while true; do
-		testing_vaultfile_fqfn="${initial_suggested_vaultfile_fqfn}${suggested_n}"
-		testing_mountpoint_dir="${initial_suggested_mountpoint_dir}${suggested_n}"
-		
-		if [ -e "${testing_vaultfile_fqfn}" ] ||
-			[ -e "${testing_mountpoint_dir}" ]; then
-
-			((++suggested_n))
-		else
-			initial_suggested_vault_label="${initial_suggested_vault_label}${suggested_n}"
-			initial_suggested_mountpoint_dir="${initial_suggested_mountpoint_dir}${suggested_n}"
-			break
-		fi
-	done
+get_suggested_locations new_suggested_locations $initial_suggested_vaultfile_fqfn $initial_suggested_mountpoint_dir
+if [ "${new_suggested_locations}" = "yes" ]; then
+	initial_suggested_vault_label=${loc_result[vault_label]}        # via global
+	initial_suggested_mountpoint_dir=${loc_result[mountpoint_dir]}  # via global
 fi
 
 # FILE SYSTEM SELECTION
@@ -919,7 +973,7 @@ done
 
 # VAULT SIZE SELECTION
 while true; do
-	CRYPTOVAULTSIZEINPUT=$(dialog --title "Enter desired crypto vault size" --inputbox "\nEnter the desired crypto vault size in\nmegabytes (MB) or gigabytes (GB).\n\nPlease be mindful of the available drive space.\n\n" 14 55 512MB 2>&1 > /dev/tty)
+	CRYPTOVAULTSIZEINPUT=$(dialog --title "Enter desired crypto vault size" --inputbox "\nEnter the desired crypto vault size in\nmegabytes (MB) or gigabytes (GB).\n\nPlease be mindful of the available drive space.\n\n" 15 55 512MB 2>&1 > /dev/tty)
 	_ret=$?
 
 	# ok (proceed) / cancel
@@ -989,6 +1043,18 @@ ${vaulthome_example}" 26 78
 	# get this result array via a global set by find_existing_parent, called above
 	vaultpath_first_created=${fep_result[2]}
 
+	# set the initial defaults for the user before incrementing them
+	# (the default vaulthome  won't be used anymore, of course)
+	set_initial_locations new_suggested_locations $vaultpath_owner
+
+	# pre-increment suggested paths so that the label and the suggeted mountpoint
+	# numbers aren't out of sync (i.e. "/mnt/cryptovault2" vs. "/var/vaultfiles/cryptovault3")
+	get_suggested_locations new_suggested_locations $initial_suggested_vaultfile_fqfn $initial_suggested_mountpoint_dir
+	if [ "${new_suggested_locations}" = "yes" ]; then
+		initial_suggested_vault_label=${loc_result[vault_label]}        # via global
+		initial_suggested_mountpoint_dir=${loc_result[mountpoint_dir]}  # via global
+	fi
+
 	vaulthome_owner_info=""
 	if [ "$current_user" != "$vaultpath_owner" ]; then
 		if [ "$vaultpath_owner" = "root" ]; then
@@ -1039,7 +1105,7 @@ vaultlabel_example="\nSuggested vault label: ${suggested_vault_label}"
 while true; do
 	CRYPTOVAULT_LABEL_INPUT=$(dialog --title "Crypto Vault Label/File Name" --inputbox "\nEnter the desired crypto vault label (no spaces). It will also be used as the crypto vault file name.\n\n
 NOTE: Since the crypto vaults are mapped through /dev/mapper system-wide (even when access is limited to a specific user), the label must be unique on the system. For user vaults, including the user's name in the vault name is recommended.\n\n
-NOTE: To accept the default/suggestion, just hit ENTER\n" 17 70 "${suggested_vault_label}" 2>&1 > /dev/tty)
+NOTE: To accept the default/suggestion, just hit ENTER\n" 18 70 "${suggested_vault_label}" 2>&1 > /dev/tty)
 	_ret=$?
 
 	# ok (proceed) / cancel
@@ -1102,12 +1168,22 @@ NOTE: To accept the default/suggestion, just hit ENTER\n" 17 70 "${suggested_vau
 done
 
 # VAULT MOUNTPOINT
-# $initial_suggested_mountpoint_dir comes from preincrement (double-checking here..)
-get_first_available_dir suggested_mountpoint_dir $initial_suggested_mountpoint_dir "any_empty"
-
-if [ "$current_user" = "root" ]; then
+if [ "$selected_user" = "root" ]; then
+	initial_suggested_mountpoint_dir="/mnt/${CRYPTOVAULT_LABEL}"
+	get_first_available_dir suggested_mountpoint_dir $initial_suggested_mountpoint_dir "any_empty"
 	mountpoint_example="\nSuggested system-wide mountpoint location: ${suggested_mountpoint_dir}"
 else
+	# if the mountpoint starts with the current username,
+	# suggest the mountpoint dir name without it
+	if [[ "$CRYPTOVAULT_LABEL" =~ ^${selected_user}-(.*)$ ]]; then
+		MOUNTPOINT_LABEL="${BASH_REMATCH[1]}"
+	else
+		MOUNTPOINT_LABEL=${CRYPTOVAULT_LABEL}
+	fi
+	initial_suggested_mountpoint_dir="${selected_user_home}/mnt/${MOUNTPOINT_LABEL}"
+	get_first_available_dir suggested_mountpoint_dir $initial_suggested_mountpoint_dir "any_empty"
+
+
 	mountpoint_example="\nSuggested mountpoint location: ${suggested_mountpoint_dir}"
 fi
 
@@ -1118,7 +1194,7 @@ NOTE: Use Up/Dn [arrow] to move to move the selector, SPACE to copy selected dir
 NOTE: If a non-existent path is entered, the directory/directories will be created. Existing but non-empty directories are not accepted. This directory can not be used for other purposes.\n\n
 NOTE: Global locations (e.g. /mnt/cryptovault) are set up for root access, while user-owned locations (e.g. /home/alice/cryptovault) are set up for the owner of the parent dir (i.e. \"alice\" in this example).\n\n
 NOTE: To accept the suggested mountpoint, just hit Enter on the next screen.\n\n
-${mountpoint_example}" 28 85
+${mountpoint_example}" 28 90
 
 	MOUNTPOINT=$(dialog --title "Mountpoint selection" --dselect ${suggested_mountpoint_dir} 16 60 2>&1 > /dev/tty)
 	_ret=$?
@@ -1191,7 +1267,7 @@ ${mountpoint_example}" 28 85
 	fi
 
 	if [ "$confirm" = "true" ]; then
-		dialog --title "Confirm selected mountpoint" --yesno "\n${different_owners_WARNING}You selected mountpoint path:\n\n${MOUNTPOINT}\n\n${mountpoint_selection_info}\n\n${mountpoint_owner_info}Is this what you want?" 15 75
+		dialog --title "Confirm selected mountpoint" --yesno "\n${different_owners_WARNING}You selected mountpoint path:\n\n${MOUNTPOINT}\n\n${mountpoint_selection_info}\n\n${mountpoint_owner_info}Is this what you want?" 16 75
 		_ret=$?
 
 		case ${_ret} in
@@ -1213,9 +1289,16 @@ vaultpath_owner_home=$(getent passwd ${vaultpath_owner} | cut -d: -f6)
 if [ "$vaultpath_owner" = "root" ]; then
 	initial_suggested_command_dir="/usr/local/bin/${CRYPTOVAULT_LABEL}-commands"
 	get_first_available_dir suggested_command_dir $initial_suggested_command_dir "any_empty"
-	commanddir_example="Suggested system-wide command directory: ${suggested_command_dir} (or use \"/root/${suggested_command_dir}\" if this is a vault for the root user)"
+	commanddir_example="Suggested system-wide command directory: ${suggested_command_dir} (or use \"/root/bin/${CRYPTOVAULT_LABEL}-commands\" if this is a vault for the root user)"
 else
-	initial_suggested_command_dir="${vaultpath_owner_home}/bin/${CRYPTOVAULT_LABEL}-commands"
+	# if the command dir starts with the current username,
+	# suggest the command dir name without it
+	if [[ "$CRYPTOVAULT_LABEL" =~ ^${selected_user}-(.*)$ ]]; then
+		COMMANDDIR_LABEL="${BASH_REMATCH[1]}"
+	else
+		COMMANDDIR_LABEL=${CRYPTOVAULT_LABEL}
+	fi
+	initial_suggested_command_dir="${vaultpath_owner_home}/bin/${COMMANDDIR_LABEL}-commands"
 	get_first_available_dir suggested_command_dir $initial_suggested_command_dir "any_empty"
 	commanddir_example="Suggested command directory (the home directory of the crypto vault owner is based on the vault file location): ${suggested_command_dir}"
 fi
@@ -1547,7 +1630,6 @@ if [ ! -d ${SCRIPT_DIR}/_stubs ] ||
 	cleanup 
 fi
 
-#TODO: Can the command script directory be named without the suggested user name? 
 # create command script directory
 commanddir_creation_error="false"
 if [ "$commanddir_exists" = "false" ]; then

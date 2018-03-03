@@ -99,9 +99,9 @@ else
 fi
 
 # "EXECUTING" and "ELEVATED" labels
-executing="\e${BGreen}EXECUTING\e${Color_Off}"
+executing="${BGreen}EXECUTING${Color_Off}"
 if [ "$im_root" = "0" ]; then
-  elevated=" \e${Black}\e${On_Green}ELEVATED\e${Color_Off}"
+  elevated=" ${Black}${On_Green}ELEVATED${Color_Off}"
 else
   elevated=''
 fi
@@ -128,7 +128,7 @@ check_mounted {
 # revert made changes (such as after an partially completed setup)
 cleanup() {
   echo
-  echo -e "\e${BIRed}Cleaning upt...\e${Color_Off}"  
+  echo -e "${BIRed}Cleaning upt...${Color_Off}"  
 
   check_mounted $MOUNTPOINT
   if ${_RET} ; then
@@ -258,12 +258,12 @@ trap cleanup INT ERR
 
 if [ $sudo_pwd_req = "true" ]; then 
   echo
-  echo -e "\e${IYellow}NOTE: You may be prompted for the sudo password for some operations.\e${Color_Off}"
+  echo -e "${IYellow}NOTE: You may be prompted for the sudo password for some operations.${Color_Off}"
   echo
 fi
 
 # set up the loop device
-echo -e "\e${BIWhite}Setting up the loop device...\e${Color_Off}"
+echo -e "${BIWhite}Setting up the loop device...${Color_Off}"
 loopdev=`sudo losetup -f`
 echo "Using loop device: $loopdev"
 executable="losetup $loopdev ${CRYPTOVAULT_FQFN}"
@@ -284,10 +284,10 @@ fi
 echo
 
 # open the mapped loop device (req. selected encryption password)
-echo -e "\e${BIWhite}Opening the mapped device...\e${Color_Off}"
+echo -e "${BIWhite}Opening the mapped device...${Color_Off}"
 executable="cryptsetup luksOpen $loopdev ${CRYPTOVAULT_LABEL}"
 echo -e "${executing}$elevated: $executable"
-echo -e "\e${IYellow}The encrypted device is being opened. Please enter below the encryption password\nselected when the vault was created (NOTE: typed characters will not echo).\e${Color_Off}"
+echo -e "${IYellow}The encrypted device is being opened. Please enter below the encryption password\nselected when the vault was created (NOTE: typed characters will not echo).${Color_Off}"
 sudo $executable
 if [ $? -ne 0 ]; then
   echo "Unable to decrypt the vault. Are you sure you entered the password correctly?"
@@ -299,7 +299,7 @@ fi
 echo
 
 # mounting the filesystem
-echo -e "\e${BIWhite}Mounting the ${CRYPTOVAULT_FS} filesystem...\e${Color_Off}"
+echo -e "${BIWhite}Mounting the ${CRYPTOVAULT_FS} filesystem...${Color_Off}"
 if [ "$CRYPTOVAULT_FS" = "zfs" ]; then
   zpool_id="zpool-${CRYPTOVAULT_LABEL}"
   echo "zpool ID for this crypto vault is: $zpool_id"
@@ -308,7 +308,7 @@ if [ "$CRYPTOVAULT_FS" = "zfs" ]; then
   sudo $executable
   echo "Currently mounted zfs filesystems:"
   sudo zfs list
-  echo -e "\e${BIWhite}Scrubbing the mounted filesystem (integrity check)...\e${Color_Off}"
+  echo -e "${BIWhite}Scrubbing the mounted filesystem (integrity check)...${Color_Off}"
   executable="zpool scrub $zpool_id"
   sudo $executable  
 else
@@ -327,14 +327,14 @@ fi
 # test the mount
 check_mounted $CRYPTOVAULT_MOUNTPOINT
 if ! ${_RET} ; then
-  echo -e "\e${BWhite}\e${On_Red}Could not mount the crypt disk at  \"${CRYPTOVAULT_MOUNTPOINT}\". Cannot continue.\e${Color_Off}"
+  echo -e "${BWhite}${On_Red}Could not mount the crypt disk at  \"${CRYPTOVAULT_MOUNTPOINT}\". Cannot continue.${Color_Off}"
   cleanup
 fi
 
 # TODO: is this needed? Probably not...
 if [ "$mountpath_owner" != "root" ]; then
   echo
-  echo -e "\e${BIWhite}Setting the mountpoint permissions...\e${Color_Off}"
+  echo -e "${BIWhite}Setting the mountpoint permissions...${Color_Off}"
   executable="chmod 770 ${CRYPTOVAULT_MOUNTPOINT}"
   echo -e "${executing}$elevated: $executable"
   sudo $executable
