@@ -109,7 +109,6 @@ mount_fileop_sudoreq="false"
 command_fileop_sudoreq="false"
 
 # who *am* I?
-# todo: maybe use login_user for suggests?
 login_user=$(logname 2>/dev/null || echo ${SUDO_USER:-${USER}})
 current_user=$(whoami)
 # am I root??
@@ -147,6 +146,14 @@ fi
 # to transit info from some functions
 declare -A fep_result
 declare -A loc_result
+
+# Define the 'EXECUTING' output flag
+executing="${BGreen}EXECUTING${Color_Off}"
+if [ "$im_root" = "false" ]; then
+	elevated=" ${Black}${On_Green}ELEVATED${Color_Off}"
+else
+	elevated=''
+fi
 
 # FUNCTIONS ==================================================================
 
@@ -192,10 +199,19 @@ validate_sudopwd() {
 
 # todo: non-dialog pwd inquiry with an arg (for dialog install)
 get_sudo_pwd() {
-	# get password
+	# $1 requests no dialog (for sudo for dialog install)
+	#[[ "$1" == "nodialog" ]] && dialog="no" || dialog="yes"
+	[[ "$1" == "" ]] && dialog="no" || dialog="yes"
+
 	while true; do
-		SUDOPWD=$(dialog --title "Enter sudo password" --insecure --passwordbox "\nThis script requires sudo access. Please enter your sudo password (your login password) to be used for the elevated script operations. The password will be cached internally by this script, but depending on your system policy, you may be re-prompted for sudo password later.\n\nNOTE: If your username is allowed to execute sudo without a password, enter an empty password above (i.e. simply press OK).\n\n" 18 70  2>&1 > /dev/tty)
-		_ret=$?
+		# get password
+		if [ "$dialog" = "yes" ]; then
+			SUDOPWD=$(dialog --title "Enter sudo password" --insecure --passwordbox "\nThis script requires sudo access. Please enter your sudo password (your login password) to be used for the elevated script operations. The password will be cached internally (in the process memory) by this script, but depending on your system policy, you may be re-prompted for sudo password later.\n\nNOTE: If your username is allowed to execute sudo without a password, enter an empty password above (i.e. simply press OK).\n\n" 18 70  2>&1 > /dev/tty)
+			_ret=$?
+		else
+			echo -e "This script requires sudo access. Please enter your sudo password (your login password) to be used for the elevated script operations; asterisks will echo. The password will be cached internally (in the process memory) by this script, but depending on your system policy, you may be re-prompted for sudo password later.\n\nNOTE: If your username is allowed to execute sudo without a password, enter an empty password above (i.e. simply hit enter). Use Control-C to cancel the script.\n\n"
+			read -s -p "Password: " SUDOPWD
+		fi
 
 		# first clear sudo password cache
 		sudo -k
@@ -225,6 +241,23 @@ get_sudo_pwd() {
 				;;
 		esac
 	done
+}
+
+sudo_requested="no"
+sudoreq() {
+	# $1 is dialog yes/no ("yes" if missing)
+	[[ "$1" == "nodialog" ]] && dialog="nodialog" || dialog=""
+
+	if [ "$root_requested" = "no" ]; then
+		if [ "$EUID" -ne 0 ]; then
+			if [ $is_sudo -eq 0 ]; then
+				get_sudo_pwd $dialog
+			fi
+		else
+			im_root="true"
+		fi
+		sudo_requested="yes"
+	fi
 }
 
 # sudo for system operations
@@ -808,69 +841,97 @@ if ! exists dialog ; then
 	if [[ "$package_manager" == "apt-get" ]] ||
 		[[ "$package_manager" == "yum" ]]; then
 
-		printf "\n\n*************************************************************************************************\n\
+		echo
+		echo -n "This script requires 'dialog'. Can I install it? (y/n)? "
+		yesno _ret
+		if [ "$_ret" = "yes" ]; then
+			# make sure we have sudo access
+			sudoreq "nodialog"
+
+			if [[ "$package_manager" == "apt-get" ]]; then
+				executable="apt-get -y install dialog"
+			elif [[ "$package_manager" == "yum" ]]; then
+				executable="yum -y install dialog"
+			fi
+			echo -e "${executing}$elevated: $executable"
+			sudoit _ret $executable
+
+			if [ ${_ret} -eq 0 ]; then
+				printf "\ndialog was installed; continuing...\n\n"
+			else
+				printf "\ndialog installation was unsuccessful. Unable to continue. Please try installing manually, then try again.\n\n"
+				exit 1
+			fi
+
+		else 
+			printf "\n\n*********************************************************************************************************\n\
 This script requires dialog. Install it first with 'sudo $package_manager install dialog', then try again!\n\
-*************************************************************************************************\n\n"
-
+*********************************************************************************************************\n\n"
+			exit 1
+		fi
 	else
-
 		printf "\n\n*************************************************************************************************\n\
 This script requires dialog. Install it first with your package manager, then try again!\n
 *************************************************************************************************\n\n"
-
+		exit 1
 	fi
-
-	exit 1
 fi
 
-if [ "$EUID" -ne 0 ]; then
-	if [ $is_sudo -eq 0 ]; then
-		get_sudo_pwd
-	fi
-else
-	im_root="true"
-fi
+if ! exists cryptsetup ; then
+	if [[ "$package_manager" == "apt-get" ]] ||
+		[[ "$package_manager" == "yum" ]]; then
 
-CRYPTSETUP=$(sudo which cryptsetup)
-if [ $? -ne 0 ]; then
+		echo
+		echo -n "This script requires 'cryptsetup'. Can I install it? (y/n)? "
+		yesno _ret
+		if [ "$_ret" = "yes" ]; then
+			# make sure we have sudo access
+			sudoreq
 
-	echo
-	echo -n "This script requires 'cryptsetup'. Can I install it? (y/n)? "
-	yesno _ret
-	if [ "$_ret" = "yes" ]; then
-		if [[ "$package_manager" == "apt-get" ]]; then
-			sudoit _ret apt-get -y install cryptsetup
-		elif [[ "$package_manager" == "yum" ]]; then
-			sudoit _ret yum -y install cryptsetup
-		fi
+			if [[ "$package_manager" == "apt-get" ]]; then
+				executable="apt-get -y install cryptsetup"
+			elif [[ "$package_manager" == "yum" ]]; then
+				executable="yum -y install cryptsetup"
+			fi
+			echo -e "${executing}$elevated: $executable"
+			sudoit _ret $executable
 
-		if [ ${_ret} -eq 0 ]; then
-			printf "\ncryptsetup was installed; continuing...\n\n"
-		else
-			printf "\ncryptsetup installation was unsuccessful. Unable to continue. Please try installing manually, then try again.\n\n"
-			exit 1
-		fi
+			if [ ${_ret} -eq 0 ]; then
+				printf "\ncryptsetup was installed; continuing...\n\n"
+			else
+				printf "\ncryptsetup installation was unsuccessful. Unable to continue. Please try installing manually, then try again.\n\n"
+				exit 1
+			fi
 
-	else 
-		printf "\n\n*********************************************************************************************************\n\
+		else 
+			printf "\n\n*********************************************************************************************************\n\
 This script requires cryptsetup. Install it first with 'sudo $package_manager install cryptsetup', then try again!\n\
 *********************************************************************************************************\n\n"
-	exit 1
+			exit 1
+		fi
+	else
+		printf "\n\n*************************************************************************************************\n\
+This script requires cryptsetup. Install it first with your package manager, then try again!\n
+*************************************************************************************************\n\n"
+		exit 1
 	fi
 fi
 
 
 # MAIN LOGIC: QUERY VAULT PARAMETERS =========================================
 
+# make sure we have sudo access
+sudoreq
+
 # set the initial vault name/location/mountpoint values
 set_initial_locations new_suggested_locations $current_user
 
 # pre-increment set initial paths so that the label and the suggeted mountpoint
-# numbers aren't out of sync (i.e. "/mnt/cryptovault2" vs. "/var/vaultfiles/cryptovault3")
+# numbers aren't out of sync (e.g. "/mnt/cryptovault2" vs. "/var/vaultfiles/cryptovault3")
 get_suggested_locations new_suggested_locations $initial_suggested_vaultfile_fqfn $initial_suggested_mountpoint_dir
 if [ "${new_suggested_locations}" = "yes" ]; then
-	initial_suggested_vault_label=${loc_result[vault_label]}        # via global
-	initial_suggested_mountpoint_dir=${loc_result[mountpoint_dir]}  # via global
+	initial_suggested_vault_label=${loc_result[vault_label]}        # via a global
+	initial_suggested_mountpoint_dir=${loc_result[mountpoint_dir]}  # via a global
 fi
 
 # FILE SYSTEM SELECTION
@@ -1047,12 +1108,13 @@ ${vaulthome_example}" 26 78
 	# (the default vaulthome  won't be used anymore, of course)
 	set_initial_locations new_suggested_locations $vaultpath_owner
 
-	# pre-increment suggested paths so that the label and the suggeted mountpoint
+	# pre-increment suggested paths for the new user (in case the location changed
+	# to a different user's domain so that the label and the suggeted mountpoint
 	# numbers aren't out of sync (i.e. "/mnt/cryptovault2" vs. "/var/vaultfiles/cryptovault3")
 	get_suggested_locations new_suggested_locations $initial_suggested_vaultfile_fqfn $initial_suggested_mountpoint_dir
 	if [ "${new_suggested_locations}" = "yes" ]; then
-		initial_suggested_vault_label=${loc_result[vault_label]}        # via global
-		initial_suggested_mountpoint_dir=${loc_result[mountpoint_dir]}  # via global
+		initial_suggested_vault_label=${loc_result[vault_label]}        # via a global
+		initial_suggested_mountpoint_dir=${loc_result[mountpoint_dir]}  # via a global
 	fi
 
 	vaulthome_owner_info=""
@@ -1380,7 +1442,7 @@ ${commanddir_example}" 26 90
 	fi
 done
 
-#TODO: Offer to symlink command scripts onto PATH (confirm that the path exists as expected)
+#TODO: Offer to symlink command scripts onto PATH (confirm that the the command dir is on path first)
 
 dialog --title "Confirm to start crypto vault creation" --yesno "\nIf you proceed, the encrypted vault will be created with the following parameters you have entered:\n\n
 Vault filesystem...........: ${CRYPTOVAULT_FS}\n
@@ -1413,13 +1475,6 @@ echo
 
 trap - INT TERM
 trap 'cleanup interrupt' INT TERM
-
-executing="${BGreen}EXECUTING${Color_Off}"
-if [ "$im_root" = "false" ]; then
-	elevated=" ${Black}${On_Green}ELEVATED${Color_Off}"
-else
-	elevated=''
-fi
 
 # create vault path
 vaultpath_creation_error="false"
@@ -1656,30 +1711,35 @@ if [ "$commanddir_exists" = "false" ]; then
 	fi
 fi
 
-# centralized error check for the command script customization functions
+# centralized error check function for 
+# the command script customization operations
 tempfile_customization_validation() {
 	local retval="$1"
 	local step="$2"
 
 	if [ "$retval" != "0" ]; then
 		echo "Error in customizing the vault command scripts (failed while ${step}). Unable to proceed."
+		cleanup
+	else
+		echo "Completed ${step}."
 	fi
 }
 
 # create file descriptor reference to a deleted temp file (automatically purged on exit)
-tmpfile=$(mktemp /tmp/tmp.1234567890XXXXXX)
-tempfile_customization_validation $? "creting tempfile"
+randstring=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 16 | head -n 1)
+tmpfile=$(mktemp /tmp/tmp.${randstring})
+tempfile_customization_validation $? "creting tempfile ${tmpfile}"
 
 exec 3>"$tmpfile"
 tempfile_customization_validation $? "creating tempfile handle"
 
-rm "$tmpfile"
+rm -f "$tmpfile"
 tempfile_customization_validation $? "removing tempfile ${tmpfile}"
 
 echo -e "\n${BIWhite}Adding the vault-specific configuration variables to the command script stubs...${Color_Off}"
 
-# NOTE: The non-standard code indentation on the following items is intentional; do not modify it!
 
+# NOTE: The non-standard code indentation on the items below is intentional; do not modify it!
 
 # MOUNT SCRIPT...
 
@@ -1706,8 +1766,6 @@ CRYPTOVAULT_LABEL=${CRYPTOVAULT_LABEL}\n" > /dev/fd/3
 
 fi
 
-#TODO: add "EXECUTING" outputs to the process
-
 # append stub file into the temp file descriptor
 if [ "$command_fileop_sudoreq" = "false" ]; then
 	cat "${SCRIPT_DIR}/_stubs/mount-crypto" >> /dev/fd/3
@@ -1733,7 +1791,7 @@ cat /dev/null > /dev/fd/3
 tempfile_customization_validation $? "purging the temporary file handle after mount script creation"
 
 echo "Crypto vault mount script now ready at ${CRYPTOVAULT_COMMANDDIR}/mount-${CRYPTOVAULT_LABEL}"
-
+echo
 
 # UMOUNT SCRIPT...
 
@@ -1771,7 +1829,7 @@ cat /dev/null > /dev/fd/3
 tempfile_customization_validation $? "purging the temporary file handle after umount script creation"
 
 echo "Crypto vault umount script now ready at ${CRYPTOVAULT_COMMANDDIR}/umount-${CRYPTOVAULT_LABEL}"
-
+echo
 
 # UTIL SCRIPT...
 
@@ -1815,8 +1873,15 @@ echo
 # set the owner for the command directory/scripts
 echo -e "${BIWhite}Setting the owner for the vault command scripts...${Color_Off}"
 executable="chown -R ${commanddir_parent_owner}:${commanddir_parent_owner} ${CRYPTOVAULT_COMMANDDIR}"
-echo -e "${executing}$elevated: $executable"
-sudoit _ret $executable
+
+if [ "$commanddir_parent_owner" = "$current_user" ]; then
+	echo -e "$executing: $executable"
+	eval $executable 2>/dev/null
+	_ret=$?
+else
+	echo -e "${executing}$elevated: $executable"
+	sudoit _ret $executable
+fi
 
 if [ ${_ret} -eq 0 ]; then
 	echo "Vault command directory/script owner set."
@@ -1828,8 +1893,15 @@ fi
 # set the permsissions for the command directory/scripts
 echo -e "${BIWhite}Setting the permissions for the vault command scripts...${Color_Off}"
 executable="chmod -R 750 ${CRYPTOVAULT_COMMANDDIR}"
-echo -e "${executing}$elevated: $executable"
-sudoit _ret $executable
+
+if [ "$commanddir_parent_owner" = "$current_user" ]; then
+	echo -e "$executing: $executable"
+	eval $executable 2>/dev/null
+	_ret=$?
+else
+	echo -e "${executing}$elevated: $executable"
+	sudoit _ret $executable
+fi
 
 if [ ${_ret} -eq 0 ]; then
 	echo "Vault command directory/script permissions set."
