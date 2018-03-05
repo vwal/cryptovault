@@ -197,11 +197,9 @@ validate_sudopwd() {
 	fi
 }
 
-# todo: non-dialog pwd inquiry with an arg (for dialog install)
 get_sudo_pwd() {
 	# $1 requests no dialog (for sudo for dialog install)
-	#[[ "$1" == "nodialog" ]] && dialog="no" || dialog="yes"
-	[[ "$1" == "" ]] && dialog="no" || dialog="yes"
+	[[ "$1" == "nodialog" ]] && dialog="no" || dialog="yes"
 
 	while true; do
 		# get password
@@ -357,7 +355,7 @@ dir_is_ancestor() {
 	if [[ "$newpath" =~ ^(${basepath//\//\\\/})([^/]*)(.*)$ ]]; then
 
 		if [ "${BASH_REMATCH[1]}" != "" ] && # i.e. basepath is matched
-			[ "${BASH_REMATCH[2]}" = "" ] &&  # i.e. it is the exact base path (the last component of base path does not continue before the end/slash)
+			[ "${BASH_REMATCH[2]}" = "" ] && # i.e. it is the exact base path (the last component of base path does not continue before the end/slash)
 			[ "${BASH_REMATCH[3]}" != "" ]; then  # i.e. a deeper path exits; the basepath is an ancestor for the newpath!
 
 			is_ancestor="true"
@@ -1345,7 +1343,8 @@ ${mountpoint_example}" 28 90
 	fi
 done
 
-vaultpath_owner_home=$(getent passwd ${vaultpath_owner} | cut -d: -f6)
+vaultpath_owner_home=$(echo ~${vaultpath_owner})
+# ALT: $(getent passwd ${vaultpath_owner} | cut -d: -f6)
 
 # CRYPTO VAULT COMMAND DIRECTORY (require an empty, or previuosly non-existing directory)
 if [ "$vaultpath_owner" = "root" ]; then
@@ -1441,8 +1440,6 @@ ${commanddir_example}" 26 90
 		esac
 	fi
 done
-
-#TODO: Offer to symlink command scripts onto PATH (confirm that the the command dir is on path first)
 
 dialog --title "Confirm to start crypto vault creation" --yesno "\nIf you proceed, the encrypted vault will be created with the following parameters you have entered:\n\n
 Vault filesystem...........: ${CRYPTOVAULT_FS}\n
@@ -1683,6 +1680,9 @@ if [ ! -d ${SCRIPT_DIR}/_stubs ] ||
 
 	echo "The utility script stubs in \"_stubs\" subdirectory are missing. Unable to proceed. Please make sure that you have not altered the cloned \"cryptovault\" repository (https://github.com/vwal/cryptovault), and try again!"
 	cleanup 
+else
+	echo "Now setting up the utility scripts for this cryptovault."
+	echo
 fi
 
 # create command script directory
@@ -1737,7 +1737,6 @@ rm -f "$tmpfile"
 tempfile_customization_validation $? "removing tempfile ${tmpfile}"
 
 echo -e "\n${BIWhite}Adding the vault-specific configuration variables to the command script stubs...${Color_Off}"
-
 
 # NOTE: The non-standard code indentation on the items below is intentional; do not modify it!
 
@@ -1927,6 +1926,56 @@ else
 
 	# activate 'cleanup nodelete' trap (INT TERM)
 	trap 'echo && echo "Closing the crypto vault." && cleanup nodelete' INT TERM
+
+	echo -n "Would you like to symlink the command scripts at ${CRYPTOVAULT_COMMANDDIR} to a location on PATH (y/n)? "
+	yesno _ret
+	if [ "$_ret" = "yes" ]; then
+
+		command_user_home=$(echo ~${commanddir_parent_owner})
+		command_user_PATH=$(su - ${commanddir_parent_owner} -c env | grep ^PATH= | cut -d'=' -f2-)
+
+		if [[ ! "${command_user_PATH}" =~ (^|:)"${command_user_home}/bin"(:|$) ]]; then
+			dialog --title "USER'S LOCAL ~/bin NOTICE!" --msgbox "\nNOTE: The cryptovault command user (${commanddir_parent_owner}) doesn't have their local ~/bin directory\n
+ (${command_user_home}/bin) on the PATH, however, it will be one of the options on the next screen in case you decide to add it to the PATH (in the user's .bashrc, .zshrc, or such)." 15 40
+		fi
+
+		#todo: add some suggested paths above
+
+		# determine whether this is a personal vault or a system vault
+		# (mostly pertainin to the root user), i.e. whether the vault file
+		# resides under $HOME or not
+		dir_is_ancestor ancestor_check "${command_user_home}" "$VAULTFILE_HOME"
+
+		if [ "${commanddir_parent_owner}" = "root" ] && 
+			[ "${ancestor_check}" = "false" ]; then
+
+			suggested_symlink_target="/usr/local/bin"
+		else
+			suggested_symlink_target="${command_user_home}/bin"
+		fi
+
+		SELECT_SYMLINK_PATH_TARGET=$(dialog --title "Select command symlink target path" --dselect ${suggested_symlink_target} 16 60 2>&1 > /dev/tty)
+		_ret=$?
+
+		# ok (proceed) / cancel
+		case ${_ret} in
+			0)
+				;;
+			1)
+				early_exit && continue
+				;;
+		esac
+
+		# remove slash from the end if there i one
+		SELECT_SYMLINK_PATH_TARGET=${SELECT_SYMLINK_PATH_TARGET%/}
+
+		# todo: make sure the selected location exists
+		# todo: how about symlink ownership? Warning if crossing user border?
+
+		# create symlinks
+		ln -s "${CRYPTOVAULT_COMMANDDIR}/*" ${selected_symlink_target}/
+
+	fi
 
 	dialog --title "Lock/unmount the new crypto vault?" --yesno "\nDo you want to leave the newly created crypto vault mounted and unlocked at \"${MOUNTPOINT}\"?\n\n
 You can unmount/lock and remount/unlock the crypto vault at any time using the \"mount-${CRYPTOVAULT_LABEL}\" and \"umount-${CRYPTOVAULT_LABEL}\" scripts which have been created at \"${CRYPTOVAULT_COMMANDDIR}\"." 20 70
